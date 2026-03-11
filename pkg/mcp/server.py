@@ -48,6 +48,127 @@ def initialize_clients():
 
 initialize_clients()
 
+def _resolve_repo_path(*parts: str) -> str:
+    """
+    Resolve a path relative to the repo root (two levels up from this file).
+    server.py lives at pkg/mcp/server.py.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(here, "..", ".."))
+    return os.path.join(repo_root, *parts)
+
+
+@app.tool()
+def explain_ocs_policy(
+    config_path: str = "pkg/ocs/ocs_config.yaml",
+    output_format: str = "bullets",
+) -> Dict[str, Any]:
+    """
+    Explain OCS policy configuration in a structured way.
+
+    Args:
+        config_path: Path to the OCS config YAML (repo-relative by default).
+        output_format: "bullets" | "plain" | "json"
+    """
+    if output_format not in {"bullets", "plain", "json"}:
+        return {"error": f"Invalid output_format '{output_format}' (expected bullets|plain|json)"}
+
+    resolved_path = config_path
+    if not os.path.isabs(config_path):
+        resolved_path = _resolve_repo_path(config_path)
+
+    if not os.path.exists(resolved_path):
+        return {"error": f"OCS config not found at {resolved_path}"}
+
+    try:
+        with open(resolved_path, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        return {"error": f"Failed to read OCS config: {str(e)}"}
+
+    policy_raw = cfg.get("policy") or []
+    if isinstance(policy_raw, str):
+        policy_raw = [policy_raw]
+
+    metrics = cfg.get("metrics") or []
+    if not isinstance(metrics, list):
+        metrics = []
+
+    derived_checks: List[Dict[str, Any]] = []
+    for m in metrics:
+        if not isinstance(m, dict):
+            continue
+        health = m.get("health_config") or {}
+        if not isinstance(health, dict):
+            health = {}
+
+        threshold = health.get("critical_threshold")
+        polarity = health.get("polarity")
+        metric_name = m.get("name")
+        metric_type = m.get("type")
+        unit = m.get("unit")
+
+        if threshold is None:
+            continue
+
+        if polarity == "high_is_bad":
+            condition = f"{metric_name} > {threshold}{unit or ''}"
+        elif polarity == "low_is_bad":
+            condition = f"{metric_name} < {threshold}{unit or ''}"
+        else:
+            condition = f"{metric_name} crosses {threshold}{unit or ''}"
+
+        derived_checks.append(
+            {
+                "metric": metric_name,
+                "metric_type": metric_type,
+                "unit": unit,
+                "critical_threshold": threshold,
+                "polarity": polarity,
+                "condition": condition,
+            }
+        )
+
+    time_window_minutes = cfg.get("time_window_minutes")
+    workloads = cfg.get("workload") or []
+    if isinstance(workloads, str):
+        workloads = [workloads]
+
+    explanation_lines: List[str] = []
+    if policy_raw:
+        explanation_lines.append("Policy statements:")
+        for p in policy_raw:
+            explanation_lines.append(f"- {p}")
+    if derived_checks:
+        explanation_lines.append("Derived metric checks (from metrics.health_config):")
+        for chk in derived_checks:
+            explanation_lines.append(f"- {chk.get('condition')}")
+    if workloads:
+        explanation_lines.append(f"Configured workloads: {', '.join(workloads)}")
+    if time_window_minutes is not None:
+        explanation_lines.append(f"Prometheus query time window (minutes): {time_window_minutes}")
+
+    if output_format == "plain":
+        explanation: Union[str, List[str], Dict[str, Any]] = "\n".join(explanation_lines).strip()
+    elif output_format == "bullets":
+        explanation = explanation_lines
+    else:
+        explanation = {
+            "policy": policy_raw,
+            "derived_checks": derived_checks,
+            "workloads": workloads,
+            "time_window_minutes": time_window_minutes,
+        }
+
+    return {
+        "policy_raw": policy_raw,
+        "derived_checks": derived_checks,
+        "workloads": workloads,
+        "time_window_minutes": time_window_minutes,
+        "explanation": explanation,
+        "timestamp": datetime.now().isoformat(),
+    }
+
 
 @app.tool()
 def workload_metrics(

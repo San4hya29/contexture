@@ -70,10 +70,10 @@ class KubernetesMetricsGenerator:
         self.namespaces = ['default', 'kube-system', 'monitoring', 'logging', 'istio-system',
                           'ingress-nginx', 'cert-manager', 'mysql', 'redis', 'kafka',
                           'app-backend', 'app-frontend', 'app-api', 'app-worker', 'app-scheduler']
-        self.container_names = ['app', 'sidecar', 'init', 'proxy', 'metrics-exporter',
-                               'log-collector', 'cache', 'database', 'queue', 'worker']
-        self.services = ['app', 'sidecar', 'init', 'proxy', 'metrics-exporter',
-                               'log-collector', 'cache', 'database', 'queue', 'worker']
+        self.container_names = ['app', 'backend', 'frontend', 'sidecar', 'init', 'proxy', 'metrics-exporter',
+                               'log-collector', 'cache', 'db', 'queue', 'worker']
+        self.services = ['app', 'backend', 'frontend', 'sidecar', 'init', 'proxy', 'metrics-exporter',
+                               'log-collector', 'cache', 'db', 'queue', 'worker']
 
     def _generate_cluster_names(self) -> List[str]:
         """Generate cluster names"""

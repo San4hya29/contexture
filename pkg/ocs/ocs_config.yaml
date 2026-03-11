@@ -12,9 +12,9 @@ metrics:
       polarity: "high_is_bad"
 
 workload:
-  - database
-  - app
-  - queue
+  - db
+  - backend
+  - frontend
 # Time window in minutes for Prometheus queries
 # If set, queries will use current time minus this window as the range
 # Example: 30 means query from (now - 30 minutes) to now
