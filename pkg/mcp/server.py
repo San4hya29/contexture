@@ -50,6 +50,57 @@ initialize_clients()
 
 
 @app.tool()
+def current_metric_for_pods(
+    metric_name: str = "container_cpu_usage_seconds_total",
+    pod_names: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Get the current CPU usage for a list of pods directly using Prometheus query.
+    """
+    if not prometheus_clients:
+        return {"error": "Prometheus client not initialized"}
+    
+    if not pod_names:
+        return {"error": "No pods provided"}
+    
+    results = []
+    all_results = {}
+    for prom_name, client in prometheus_clients.items():
+        results = []
+        try:
+            for pod_name in pod_names:
+                # PromQL query for the given pod
+                query = f"{metric_name}{{pod='{pod_name}'}}"
+                
+                # Query Prometheus for current value
+                response = client.custom_query(query=query)
+                
+                # Extract latest value if available
+                value = None
+                if response and len(response) > 0:
+                    try:
+                        value = float(response[0]['value'][1])
+                    except (KeyError, ValueError, IndexError):
+                        value = None
+                
+                results.append({
+                    "pod": pod_name,
+                    "query": query,
+                    "current_cpu_value": value
+                })  
+            
+        except Exception as e:
+            return {"error": f"Failed to query Prometheus: {str(e)}"}
+
+        all_results[prom_name] = results
+
+    return {
+                "metric": metric_name,
+                "pods_current_cpu_per_prometheus": all_results,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+@app.tool()
 def workload_metrics(
     metric_name: str = "container_cpu_usage_seconds_total",
     workload_name: Optional[str] = None,   
