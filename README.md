@@ -81,3 +81,4 @@ We are actively developing the project. So if you would like to join the design,
 ### How to join the development?
   - [GitHub](https://github.com/sodafoundation/contexture)
   - [SODA Slack](https://sodafoundation.slack.com)
+  - [OCS RFC] (https://docs.google.com/document/d/1XHN8NuXTPqKWOikFALfCTZHt6JCDpsHS)
