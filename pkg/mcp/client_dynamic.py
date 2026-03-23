@@ -65,28 +65,41 @@ async def ask_ollama(prompt: str, history="") -> str:
 
 
 async def llm_to_workflow(nl_query: str) -> list:
-    print("Entering llm_to_workflow with query:", nl_query)
+    #print("Entering llm_to_workflow with query:", nl_query)
+    global ocs_prompt
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get("http://localhost:8000/get_ocs_prompt")
         resp.raise_for_status()
-        ocs_prompt: str = resp.text   # <-- stored as string
+        ocs_prompt = resp.text   # Use the global ocs_prompt
 
     print("Fetched OCS context from the context provider")
+    # print("OCS Prompt:", ocs_prompt)
 
 
     
     prompt = (
         "You are an assistant that converts natural language queries into a sequence of available MCP tool calls. "
         "Return ONLY JSON. Each step should include 'tool_name', 'params' (dictionary), "
-        "arrange it in a logical flow of calls. Limit to a maximum of 3 calls and a minimum of 1 call\n"
-        "If there are params that cant be filled based on the info you have, make it empty string""\n"
-        f"Providing a context specification from the context provider which is json format. Based on the natural language query, check which workload and metric is applicable along with other parameters from the specification to the workload call, which will be params to the tools. The query can have semantically relevant reference to the workload so consider that (for eg. db can be referred to by the user as database, DB etc). Compose the other tool calls based on the topology in the specification. The specification is {ocs_prompt} \n"
-        "If the user asks to explain/interpret policy (SLA, thresholds, what the policy means), include a call to explain_ocs_policy first.\n"
+        "arrange it in a logical flow of calls. Limit to a maximum of 4 calls when the user asks about full stack or all workloads (so you can cover policy + up to 3 workloads); otherwise maximum 3 calls, minimum 1 call.\n"
+        "If there are params that can't be filled based on the info you have, make it empty string.\n\n"
+        "Context specification from the context provider (JSON):\n"
+        f"{ocs_prompt}\n\n"
+        "Topology (hierarchy): Each context_definition may have a 'topology' object.\n"
+        "- 'dependencies' = workloads this workload calls (downstream dependencies).\n"
+        "- 'dependents' = workloads that call this workload (upstream callers).\n"
+        "Example: frontend depends on backend, backend depends on db → for 'backend', dependencies=[db], dependents=[frontend].\n\n"
+        "Composing workload calls:\n"
+        "- When the user asks about a workload 'and its dependencies', 'stack', 'layer', 'chain', or 'and what it calls': "
+        "call workload_metrics for that workload AND each of its topology.dependencies (in dependency order: leaf first, e.g. db then backend then frontend).\n"
+        "- When the user asks about 'full stack', 'all layers', 'whole chain', or 'all workloads': "
+        "call workload_metrics for each workload in dependency order (dependencies before dependents).\n"
+        "- Use the specification's workload names and metrics; map synonyms (e.g. database, DB → db).\n\n"
+        "If the user asks to explain/interpret policy (SLA, thresholds, what the policy means), include a call to explain_ocs_policy first.\n\n"
         "Available Tools:\n"
         "- explain_ocs_policy(config_path: str = 'pkg/ocs/ocs_config.yaml', output_format: str = 'bullets')\n"
-        "- workload_metrics(metric_name: str = 'container_cpu_utilization',workload_name: Optional[str] = None, pod_names: Optional[List[str]] = None,time_window: Optional[str] = None, aggregation: str = 'avg')"             
-        "- top_n_pods_by_metric(metric_name: str = 'container_cpu_usage_seconds_total', top_n: int = 5, window: str = '5m') \n"
+        "- workload_metrics(metric_name: str = 'container_cpu_utilization', workload_name: Optional[str] = None, pod_names: Optional[List[str]] = None, time_window: Optional[str] = None, aggregation: str = 'avg')\n"
+        "- top_n_pods_by_metric(metric_name: str = 'container_cpu_usage_seconds_total', top_n: int = 5, window: str = '5m')\n"
         "- pods_exceeding_cpu(threshold: float = 0.8)\n"
         "- pod_status_summary()\n"
         "- node_disk_usage()\n"
@@ -96,11 +109,11 @@ async def llm_to_workflow(nl_query: str) -> list:
         "- detect_pod_anomalies(metric_name='container_cpu_usage_seconds_total', z_threshold=3.0)\n"
         "- detect_crashloop_pods(window='10m', threshold=2)\n"
         "- pod_event_timeline(pod_name: str, window: str = '30m')\n"
-        "- node_condition_summary()\n"
+        "- node_condition_summary()\n\n"
         f"Natural language query: {nl_query}"
     )
     llm_response = await ask_ollama(prompt)
-    print(llm_response)
+    #print(llm_response)
     llm_response = re.sub(r"```(?:json)?", "", llm_response.strip())
 
     try:
@@ -122,13 +135,13 @@ async def execute_workflow(workflow: list) -> list:
     async with client:
         for step in workflow:
 
-            print("Executing step:", step)
+            #print("Executing step:", step)
 
             tool_name = step.get("tool_name")
             params = step.get("params", {}).copy()
 
             
-            print(params.items())
+            #print(params.items())
             for k, v in params.items():
                 if isinstance(v, str) and "{" in v:
                     try:
@@ -161,7 +174,7 @@ async def execute_workflow(workflow: list) -> list:
 
            
             try:
-                print("Calling tool:", tool_name, "with params:", params)
+                #print("Calling tool:", tool_name, "with params:", params)
                 result = await client.call_tool(tool_name, params)
             except Exception as e:
                 result = {"error": str(e)}
@@ -175,15 +188,22 @@ async def execute_workflow(workflow: list) -> list:
 
 async def run_query(nl_query: str):
     workflow = await llm_to_workflow(nl_query)
-    print("Generated Workflow:", workflow)
+    #print("Generated Workflow:", workflow)
 
     results = await execute_workflow(workflow)
-    print("\nTool call results:")
-    for r in results:
-        print(r)
+    #print("\nTool call results:")
+    """for r in results:
+        print(r)"""
 
-    print("OCS Prompt:", ocs_prompt)
-    summary_prompt = f"Summarize these tool call results: {results} \nProvide a neat minimal summary. Interpret based on the context specification provided and apply the policy in the specification to the results {ocs_prompt}. Relate the context specification to the results and analyse if the result is making any SLA violations"
+    #print("OCS Prompt:", ocs_prompt)
+    summary_prompt = (
+        f"Summarize these tool call results: {results}\n"
+        "Provide a neat minimal summary. Interpret using the context specification and its topology.\n"
+        f"Context specification: {ocs_prompt}\n\n"
+        "Rules:\n"
+        "- Do NOT include sections for 'SLA Violations' or 'Topology Interpretation' in your output.\n"
+        "- Do not assume values; analyse strictly with respect to the context specification."
+    )
     full_summary = ""
     async for chunk in ask_ollama_stream(summary_prompt):
         print(chunk, end="", flush=True)
@@ -197,7 +217,7 @@ if __name__ == "__main__":
     ocs_prompt = ""
     context = ""
     while True:
-        print("\nCurrent Context:", context)
+        #print("\nCurrent Context:", context)
         query = str(input("\nEnter your query (or 'exit' to quit)(or 'clear' to clear your history): "))
         if query.lower() == "exit":
             break
