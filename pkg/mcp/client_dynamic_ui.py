@@ -6,6 +6,22 @@ import os
 import yaml
 import string
 from fastmcp import Client
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+from datetime import datetime
+
+app = FastAPI(title="Contexture Backend Service")
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def load_config(path="config.yaml"):
     if not os.path.exists(path):
@@ -14,12 +30,28 @@ def load_config(path="config.yaml"):
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
-ollama_config = load_config("../../config/ollama_config.yaml")
-server_config  = load_config("../../config/mcp_server_config.yaml")
+# Load configurations
+config_base = os.path.join(os.path.dirname(__file__), "../../config")
+ollama_config = load_config(os.path.join(config_base, "ollama_config.yaml"))
+server_config = load_config(os.path.join(config_base, "mcp_server_config.yaml"))
 
 OLLAMA_API_URL = ollama_config.get("ollama_url")
 MODEL_NAME = ollama_config.get("ollama_model")
-client = Client(server_config.get("mcp_server_url", "http://localhost:8001/mcp"))
+# Renamed to mcp_client to avoid shadowing by the local httpx client inside llm_to_workflow
+mcp_client = Client(server_config.get("mcp_server_url", "http://localhost:8001/mcp"))
+
+# Data Models
+class QueryRequest(BaseModel):
+    query: str
+    context: Optional[str] = ""
+
+class QueryResponse(BaseModel):
+    summary: str
+    results: List[Dict]
+    workflow: List[Dict]
+    ocs_input: str
+    ocs_output: str
+    timestamp: str
 
 async def ask_ollama_stream(prompt: str):
     
@@ -64,18 +96,18 @@ async def ask_ollama(prompt: str, history="") -> str:
         return data["choices"][0]["text"]
 
 
+# Returns only list (ocs_prompt is fetched separately in run_query)
 async def llm_to_workflow(nl_query: str) -> list:
-    #print("Entering llm_to_workflow with query:", nl_query)
-    global ocs_prompt
+    print("Entering llm_to_workflow with query:", nl_query)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get("http://localhost:8000/get_ocs_prompt")
+    # Use a local variable named http_client to avoid shadowing the global mcp_client
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
+        resp = await http_client.get("http://localhost:8000/get_ocs_prompt")
         resp.raise_for_status()
-        ocs_prompt = resp.text   # Use the global ocs_prompt
+        ocs_prompt: str = resp.text   # <-- stored as string
 
     print("Fetched OCS context from the context provider")
     # print("OCS Prompt:", ocs_prompt)
-
 
     
     prompt = (
@@ -113,7 +145,7 @@ async def llm_to_workflow(nl_query: str) -> list:
         f"Natural language query: {nl_query}"
     )
     llm_response = await ask_ollama(prompt)
-    #print(llm_response)
+    # print(llm_response)
     llm_response = re.sub(r"```(?:json)?", "", llm_response.strip())
 
     try:
@@ -132,16 +164,15 @@ async def execute_workflow(workflow: list) -> list:
     results = []
     history = ""
 
-    async with client:
+    async with mcp_client:
         for step in workflow:
 
-            #print("Executing step:", step)
+            print("Executing step:", step)
 
             tool_name = step.get("tool_name")
             params = step.get("params", {}).copy()
 
-            
-            #print(params.items())
+            # print(params.items())
             for k, v in params.items():
                 if isinstance(v, str) and "{" in v:
                     try:
@@ -149,81 +180,114 @@ async def execute_workflow(workflow: list) -> list:
                     except Exception:
                         pass
 
-            
+            # Collect keys that need resolution BEFORE iterating to avoid mutation errors
+            keys_to_resolve = []
             for k, v in params.items():
-                if v is None or (isinstance(v, str) and v.strip() == "") or v=="" or v==[]:
-                    print("Resolving param my making another call to LLM...")
-                    summary_prompt = f"Summarize these tool call results: {results}\nProvide a neat minimal summary."
+                if v is None or (isinstance(v, str) and v.strip() == "") or v == "" or v == []:
+                    keys_to_resolve.append(k)
 
-                    llm_value = await ask_ollama(summary_prompt, "")
-                    prompt = (
-                        f"\nGiven the previous tool outputs, \n"
-                        f"Read carefully and get the appropriate value from previous tool outputs for the workflow step for parameter {v}. Make sure the value is of correct type (str, int, list etc)"
-                        "and return tool call only in JSON format. remove unnecessary characters and '\n', also make sure number of params is same as the workflow step \n"
-                    )
-                    llm_value = await ask_ollama(prompt, "Workflow Step: "+str(step) + " Previous tool results: "+str(llm_value))
-                    try:
-                        # Try parsing JSON first
-                        parsed_value = re.sub(r"```(?:json)?", "", llm_value.strip())
-                        params = json.loads(parsed_value)
-                        params = params["params"]
-                    except json.JSONDecodeError:
-                        # fallback: use raw text
-                        params = re.sub(r"```(?:json)?", "", llm_value.strip())
-                        params = params["params"]
+            for k in keys_to_resolve:
+                print("Resolving param my making another call to LLM...")
+                summary_prompt = f"Summarize these tool call results: {results}\nProvide a neat minimal summary."
+
+                llm_value = await ask_ollama(summary_prompt, "")
+                prompt = (
+                    f"\nGiven the previous tool outputs, \n"
+                    f"Read carefully and get the appropriate value from previous tool outputs for the workflow step for parameter {k}. Make sure the value is of correct type (str, int, list etc)"
+                    "and return tool call only in JSON format. remove unnecessary characters and '\n', also make sure number of params is same as the workflow step \n"
+                )
+                llm_value = await ask_ollama(prompt, "Workflow Step: "+str(step) + " Previous tool results: "+str(llm_value))
+                try:
+                    # Try parsing JSON first; update only this key, don't replace the whole params dict
+                    parsed_value = re.sub(r"```(?:json)?", "", llm_value.strip())
+                    resolved_params = json.loads(parsed_value)
+                    params[k] = resolved_params.get("params", {}).get(k, resolved_params)
+                except json.JSONDecodeError:
+                    # fallback: use raw text for this key only
+                    params[k] = re.sub(r"```(?:json)?", "", llm_value.strip())
 
            
             try:
-                #print("Calling tool:", tool_name, "with params:", params)
-                result = await client.call_tool(tool_name, params)
+                print("Calling tool:", tool_name, "with params:", params)
+                result = await mcp_client.call_tool(tool_name, params)
             except Exception as e:
                 result = {"error": str(e)}
-
-            
 
             results.append({"tool_name": tool_name, "result": result})
 
     return results
 
 
-async def run_query(nl_query: str):
+async def run_query(nl_query: str) -> tuple:
     workflow = await llm_to_workflow(nl_query)
-    #print("Generated Workflow:", workflow)
+    print("Generated Workflow:", workflow)
+
+    # Fetch ocs_prompt here so it's available for the summary prompt below
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
+        resp = await http_client.get("http://localhost:8000/get_ocs_prompt")
+        resp.raise_for_status()
+        ocs_prompt: str = resp.text
 
     results = await execute_workflow(workflow)
-    #print("\nTool call results:")
+    # print("\nTool call results:")
     """for r in results:
         print(r)"""
 
-    #print("OCS Prompt:", ocs_prompt)
     summary_prompt = (
         f"Summarize these tool call results: {results}\n"
         "Provide a neat minimal summary. Interpret using the context specification and its topology.\n"
         f"Context specification: {ocs_prompt}\n\n"
         "Rules:\n"
-        "- Do NOT include sections for 'SLA Violations' or 'Topology Interpretation' in your output.\n"
-        "- Do not assume values; analyse strictly with respect to the context specification."
+        "- Apply the policy in the specification to the results; only report an SLA violation when the metric value strictly exceeds the critical_threshold in the same unit (do not assume; compare numerically).\n"
+        "- If the specification has 'topology' (dependencies/dependents), interpret results along the dependency chain: e.g. 'workload A depends on B'; if A is bad and B is good, note that the issue is likely in A; if B is bad, note that A may be affected by B.\n"
+        "Do not assume values; analyse strictly with respect to the context specification."
     )
     full_summary = ""
     async for chunk in ask_ollama_stream(summary_prompt):
         print(chunk, end="", flush=True)
         full_summary += chunk
+    
     print("\n")
+    
     return full_summary, results
 
 
-if __name__ == "__main__":
-    global ocs_prompt
-    ocs_prompt = ""
-    context = ""
-    while True:
-        #print("\nCurrent Context:", context)
-        query = str(input("\nEnter your query (or 'exit' to quit)(or 'clear' to clear your history): "))
-        if query.lower() == "exit":
-            break
-        if query.lower() == "clear":
-            context = ""
-            continue
+# FastAPI Endpoints
 
-        summary, result = asyncio.run(run_query(context + query))
-        context+=summary
+@app.get("/")
+def root():
+    return {"message": "Contexture Backend Service", "status": "running"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.post("/api/query")
+async def process_query(request: QueryRequest):
+    """
+    Process a natural language query and return results with OCS context
+    """
+    try:
+        full_summary, results = await run_query(request.query)
+        return {"summary": full_summary, "results": results, "timestamp": datetime.now().isoformat()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/config")
+def get_config():
+    """Return current backend configuration"""
+    return {
+        "ollama_url": OLLAMA_API_URL,
+        "model": MODEL_NAME,
+        "mcp_server": server_config.get("mcp_server_url"),
+        "status": "configured"
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting Contexture Backend Service...")
+    print(f"Ollama URL: {OLLAMA_API_URL}")
+    print(f"Model: {MODEL_NAME}")
+    print(f"MCP Server: {server_config.get('mcp_server_url')}")
+    uvicorn.run(app, host="0.0.0.0", port=8002)

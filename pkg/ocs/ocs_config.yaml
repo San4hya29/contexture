@@ -1,10 +1,10 @@
 policy:
-  - sla violation if cpu utilization is greater than 90%
+  - sla violation if container cpu usage exceeds 90 seconds
 
 metrics:
   - name: "container_cpu_usage_seconds_total"
     type: "gauge"
-    unit: "percentage"
+    unit: "seconds"
     description: "Current CPU usage against pod limits"
     aggregation_logic: "average"
     health_config:
@@ -12,11 +12,11 @@ metrics:
       polarity: "high_is_bad"
 
 workload:
-  - database
-  - app
-  - queue
+  - db
+  - backend
+  - frontend
 # Time window in minutes for Prometheus queries
 # If set, queries will use current time minus this window as the range
 # Example: 30 means query from (now - 30 minutes) to now
-time_window_minutes: 5
+time_window_minutes: 30
 

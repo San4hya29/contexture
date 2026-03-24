@@ -31,3 +31,6 @@ influxdb-client==1.45.0
 pandas==2.2.3
 fastmcp==0.2.0
 PyYAML==6.0.2
+fastapi
+uvicorn
+pydantic
