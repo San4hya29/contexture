@@ -76,6 +76,15 @@ OCS Defines the key attributes to build the operational context:
   - Threshold, Polarity, Aggregation
 
 ### Progress 
+#### Supported Data Connectors
+- Prometheus
+- postgres - developing
+- ceph - analysing
+- s3 - analysing
+- ? [Please suggest]
+#### Supported Context Providers
+- istio
+- ? [Please suggest]
 We are actively developing the project. So if you would like to join the design, OCS and other components, please join us!
 
 ### How to join the development?
