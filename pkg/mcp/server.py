@@ -522,6 +522,118 @@ def node_disk_usage(window_minutes: int = 20) -> Dict[str, Any]:
 
 
 @app.tool()
+def node_memory_usage(window_minutes: int = 20) -> Dict[str, Any]:
+    """
+    Summarized node memory usage (%) across Prometheus clients.
+    """
+    if not prometheus_clients:
+        return {"error": "No Prometheus clients initialized"}
+
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(minutes=window_minutes)
+    step = "1m"
+
+    all_results = {}
+
+    for prom_name, client in prometheus_clients.items():
+        try:
+            query = """
+            100 * (1 - ((node_memory_MemFree_bytes + node_memory_Buffers_bytes + node_memory_Cached_bytes) 
+                        / node_memory_MemTotal_bytes))
+            """
+            result = client.custom_query_range(
+                query=query.strip(),
+                start_time=start_time,
+                end_time=end_time,
+                step=step
+            )
+
+            memory_usage = []
+            for item in result:
+                metric = item.get("metric", {})
+                node = metric.get("instance", metric.get("node", "unknown"))
+
+                values = [float(v[1]) for v in item.get("values", [])]
+                if not values:
+                    continue
+                avg_usage = sum(values) / len(values)
+
+                memory_usage.append({
+                    "node": node,
+                    "avg_memory_usage_percent": round(avg_usage, 2),
+                    "max_memory_usage_percent": round(max(values), 2),
+                })
+
+            memory_usage.sort(key=lambda x: x["max_memory_usage_percent"], reverse=True)
+
+            all_results[prom_name] = {
+                "query": query.strip(),
+                "window_minutes": window_minutes,
+                "top_nodes": memory_usage[:10],
+            }
+        except Exception as e:
+            all_results[prom_name] = {"error": str(e)}
+
+    return {
+        "node_memory_usage_per_prometheus": all_results,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+
+@app.tool()
+def top_memory_pressure_nodes(threshold: float = 80.0, top_n: int = 5) -> Dict[str, Any]:
+    if not prometheus_clients:
+        return {"error": "No Prometheus clients initialized"}
+
+    all_results = {}
+    for prom_name, client in prometheus_clients.items():
+        try:
+            query = """
+            100 * (1 - ((node_memory_MemFree_bytes + node_memory_Buffers_bytes + node_memory_Cached_bytes) 
+                        / node_memory_MemTotal_bytes))
+            """
+            result = client.custom_query(query=query)
+            nodes_info = []
+            for item in result:
+                metric = item.get("metric", {})
+                node = metric.get("instance", metric.get("node"))
+                usage = float(item.get("value", [0, "0"])[1])
+                if usage >= threshold:
+                    nodes_info.append({"node": node, "usage_percent": round(usage, 2)})
+
+            nodes_info.sort(key=lambda x: x["usage_percent"], reverse=True)
+            nodes_info = nodes_info[:top_n]
+
+            msg = f"⚠️ {len(nodes_info)} nodes above {threshold}% memory usage." if nodes_info else "✅ No nodes are under memory pressure."
+            all_results[prom_name] = {"nodes": nodes_info, "message": msg, "threshold": threshold}
+        except Exception as e:
+            all_results[prom_name] = {"error": str(e)}
+
+    return {"top_memory_pressure_nodes_per_prometheus": all_results, "timestamp": datetime.now().isoformat()}
+
+@app.tool()
+def pods_exceeding_memory(threshold_bytes: float = 1073741824) -> Dict[str, Any]:  # default 1GB
+    if not prometheus_clients:
+        return {"error": "No Prometheus clients initialized"}
+
+    all_results = {}
+    for prom_name, client in prometheus_clients.items():
+        try:
+            query = f'container_memory_usage_bytes > {threshold_bytes}'
+            result = client.custom_query(query=query)
+            pods = [{"pod": item["metric"].get("pod"), "memory_bytes": float(item["value"][1])} 
+                    for item in result if "pod" in item["metric"]]
+            all_results[prom_name] = pods
+        except Exception as e:
+            all_results[prom_name] = {"error": str(e)}
+
+    return {
+        "pods_exceeding_memory_per_prometheus": all_results,
+        "threshold_bytes": threshold_bytes,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.tool()
 def describe_cluster_health() -> Dict[str, Any]:
     if not prometheus_clients:
         return {"error": "No Prometheus clients initialized"}
