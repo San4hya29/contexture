@@ -87,7 +87,11 @@ OCS Defines the key attributes to build the operational context:
 - ? [Please suggest]
 We are actively developing the project. So if you would like to join the design, OCS and other components, please join us!
 
+#### Design
+- [OCS RFC] (https://docs.google.com/document/d/1XHN8NuXTPqKWOikFALfCTZHt6JCDpsHS)
+- [Architecture Design Doc] (https://docs.google.com/document/d/1uV_1DudI_Q9xaifFEUcZvXsX8sKGIpKo)
+
 ### How to join the development?
   - [GitHub](https://github.com/sodafoundation/contexture)
   - [SODA Slack](https://sodafoundation.slack.com)
-  - [OCS RFC] (https://docs.google.com/document/d/1XHN8NuXTPqKWOikFALfCTZHt6JCDpsHS)
+   
