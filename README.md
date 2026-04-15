@@ -93,5 +93,5 @@ We are actively developing the project. So if you would like to join the design,
 
 ### How to join the development?
   - [GitHub](https://github.com/sodafoundation/contexture)
-  - [SODA Slack](https://sodafoundation.slack.com)
+  - [SODA Slack](https://sodafoundation.slack.com) [Invite Link](https://join.slack.com/t/sodafoundation/shared_invite/zt-1lx91pho5-BHOJlGe7wtzZRRSRLwlvPQ)
    
