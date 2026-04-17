@@ -1,9 +1,10 @@
 import httpx
-import re
 import logging
 import yaml
 from prometheus_api_client import PrometheusConnect
 from pathlib import Path
+from pkg.copilot.DP_logic.extractor import extract_promql_from_response
+from pkg.copilot.DP_logic.syntax_validator import validate_promql
 
 
 # Set up logging
@@ -38,7 +39,6 @@ OLLAMA_CONFIG = load_ollama_config()
 OLLAMA_URL = OLLAMA_CONFIG.get("ollama_url", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = OLLAMA_CONFIG.get("ollama_model", "mistral")
 
-PROMQL_PATTERN = r"```(?:promql)?\s*(.*?)\s*```"
 
 # STEP 1: Ask Ollama to convert NL → PromQL
 def get_promql_from_ollama(question: str) -> tuple:
@@ -63,22 +63,34 @@ def get_promql_from_ollama(question: str) -> tuple:
     full_response = response.json().get("response", "")
     logger.info(f"Ollama response: {full_response}\n\n")
 
-    match = re.search(PROMQL_PATTERN, full_response, re.DOTALL)
-    if not match:
-        logger.error("Ollama response did not contain a valid PromQL query")
-        raise ValueError("No valid PromQL found")
+    # Extract PromQL using the multi-pattern extractor (handles cleanup too)
+    promql = extract_promql_from_response(full_response)
 
-    promql = match.group(1).strip()
+    # Run syntax checks — logs warnings but does not raise (let Prometheus surface hard errors)
+    validate_promql(promql)
+
     logger.info(f"Extracted PromQL: {promql}")
     return promql, full_response
 
 # STEP 2: Run PromQL on Prometheus
 def query_prometheus(promql: str, prom_config: dict):
     logger.info(f"Querying Prometheus with: {promql}")
-
+    # Handle both direct config and prometheus_instances structure
+    if "prometheus_instances" in prom_config:
+        # Extract first instance from list
+        instance = prom_config["prometheus_instances"][0]
+        base_url = instance["base_url"]
+        disable_ssl = instance.get("disable_ssl", False)
+    else:
+        # Fallback logic: check for 'base_url', then 'prometheus_url', then 'url'
+        base_url = prom_config.get("base_url") or \
+                   prom_config.get("prometheus_url") or \
+                   prom_config.get("url")
+        disable_ssl = prom_config.get("disable_ssl", True)
+    
     prom = PrometheusConnect(
-        url=prom_config["base_url"],
-        disable_ssl=True
+        url=base_url,
+        disable_ssl=disable_ssl
     )
 
     try:
