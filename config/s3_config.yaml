@@ -1,0 +1,7 @@
+# S3/MinIO Configuration for SODA Contexture
+endpoint: "localhost:9000"
+access_key: "minioadmin"
+secret_key: "minioadmin"
+use_ssl: false
+region: "us-east-1"
+bucket_name: "ocs-bucket"

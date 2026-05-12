@@ -362,7 +362,7 @@ def pod_network_io(pod_names: Optional[List[str]] = None) -> Dict[str, Any]:
             return {"error": str(e)}
         all_results[prom_name] = results
     
-    return {"pod_network_io_per_promotheus": all_results, "timestamp": datetime.now().isoformat()}
+    return {"pod_network_io_per_prometheus": all_results, "timestamp": datetime.now().isoformat()}
 
 @app.tool()
 def pods_exceeding_cpu(threshold: float = 0.8) -> Dict[str, Any]:

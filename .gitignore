@@ -15,3 +15,12 @@ output/
 context.txt
 .contextignore
 context.txt.zip
+
+# Go binaries and archives
+*.tar.gz
+minio
+ocs
+
+# Runtime logs
+*.log
+minio.log
