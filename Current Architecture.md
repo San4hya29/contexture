@@ -58,21 +58,21 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph "Request Processing"
+    subgraph RequestProcessing["Request Processing"]
         User["User<br/>Natural Language<br/>Query"]
         ParseQuery["Parse Query<br/>via Ollama"]
         GenerateWorkflow["Generate<br/>Workflow"]
         ExecuteTools["Execute<br/>MCP Tools"]
     end
 
-    subgraph "Context Building"
+    subgraph ContextBuilding["Context Building"]
         FetchOCS["Fetch OCS<br/>Prompt"]
         GetTopology["Get Topology<br/>from MongoDB"]
         GetMetrics["Get Current<br/>Metrics"]
         GetPolicies["Get Operational<br/>Policies"]
     end
 
-    subgraph "Response Generation"
+    subgraph ResponseGeneration["Response Generation"]
         CombineContext["Combine<br/>Context"]
         Summarize["Summarize<br/>Results"]
         ReturnResponse["Return to User"]
@@ -92,9 +92,9 @@ graph LR
     Summarize -->|10| ReturnResponse
 
     style User fill:#fff3e0
-    style "Request Processing" fill:#e3f2fd
-    style "Context Building" fill:#e8f5e9
-    style "Response Generation" fill:#fce4ec
+    style RequestProcessing fill:#e3f2fd
+    style ContextBuilding fill:#e8f5e9
+    style ResponseGeneration fill:#fce4ec
 ```
 
 ## Data Flow Diagram
