@@ -1,0 +1,234 @@
+🔧 MCP TOOLS & EXECUTION CONTEXT
+
+═══════════════════════════════════════════════════════════════════
+📚 AVAILABLE MCP TOOLS
+═══════════════════════════════════════════════════════════════════
+
+{{MCP_TOOLS_SCHEMAS}}
+
+═══════════════════════════════════════════════════════════════════
+🔍 QUERY ACTION PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+Use "query" action to discover existing AWS resources dynamically.
+These steps MUST be placed FIRST in your execution plan.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎓 TOOL PATTERN REFERENCE FOR NEW RESOURCES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you encounter a resource not explicitly documented below, follow these patterns:
+
+TOOL NAMING PATTERNS:
+├─ Discovery: get-default-{resource}, get-{resource}, list-{resources}, get-latest-{type}
+├─ Creation: create-{resource}
+└─ Management: start-{resource}, stop-{resource}, delete-{resource}
+
+PARAMETER STYLE:
+├─ Always camelCase: vpcId, bucketName, functionName (NOT vpc_id, bucket_name)
+├─ No filters in list tools: list-vpcs, list-subnets (NOT list-vpcs with filters)
+└─ Arrays when multiple: subnetIds, securityGroupIds
+
+OUTPUT FIELDS:
+├─ IDs: {resource}Id → vpcId, subnetId, instanceId
+├─ ARNs: {resource}Arn → roleArn, functionArn, topicArn
+└─ Names: {resource}Name → bucketName, tableName
+
+COMMON PATTERNS BY CATEGORY:
+
+Storage (S3, EFS, EBS):
+  Tools: create-s3-bucket, create-file-system, create-volume
+  Params: bucketName, fileSystemName, volumeId, size
+  No network dependencies
+
+Compute (EC2, Lambda, ECS):
+  Tools: create-ec2-instance, create-lambda-function, create-ecs-cluster
+  Params: imageId/functionName, instanceType/runtime, vpcId, subnetId, securityGroupId
+  Requires: VPC, Subnet, Security Group
+
+Database (RDS, DynamoDB):
+  Tools: create-db-instance, create-table
+  Params: dbInstanceIdentifier/tableName, engine/attributes, vpcId, subnetIds
+  Requires: VPC, Subnets (multiple AZs), Security Group, DB subnet group
+
+Network (ALB, VPC, CloudFront):
+  Tools: create-load-balancer, create-vpc, create-distribution
+  Params: name, scheme, vpcId, subnetIds, securityGroupIds
+  Requires: VPC, Subnets (2+ AZs for ALB)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 RESOURCE DISCOVERY PATTERNS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use these patterns to discover existing AWS resources. Adapt tool names based on
+available tools in the schemas above.
+
+PATTERN: Default Resource Discovery
+Use when: Need standard/default resource provided by AWS
+
+Tool Pattern: get-default-{resource}
+Example Tools: get-default-vpc, get-default-subnet
+Output: Returns primary resource ID field
+Dependencies: None (dependsOn: [])
+
+PATTERN: Specific Resource Discovery
+Use when: Need to find a specific resource by ID or identifier
+
+Tool Pattern: get-{resource}
+Example Tools: get-subnet, get-ec2-instance, get-key-pair
+Output: Returns resource details with ID field
+Dependencies: May require parent resource ID (e.g., vpcId for subnet)
+
+PATTERN: Multiple Resource Discovery
+Use when: Need to see all available resources or select from multiple
+
+Tool Pattern: list-{resources}
+Example Tools: list-vpcs, list-subnets, list-ec2-instances, list-security-groups
+Output: Returns array of resources with ID fields
+Dependencies: May require parent resource ID for filtering
+
+PATTERN: Filtered Resource Discovery
+Use when: Need resources that meet specific criteria
+
+Tool Pattern: list-{resources}-for-{purpose}
+Example Tools: list-subnets-for-alb (gets 2+ subnets in different AZs)
+Output: Returns filtered array of resources
+Dependencies: Usually requires parent resource ID
+
+PATTERN: Latest Version Discovery
+Use when: Need the most recent version of a resource
+
+Tool Pattern: get-latest-{type}
+Example Tools: get-latest-ubuntu-ami, get-latest-amazon-linux-ami
+Output: Returns latest version ID
+Dependencies: None
+
+USAGE GUIDELINES:
+- All discovery patterns use action: "query"
+- All discovery patterns have dependsOn: [] unless filtering by parent
+- Use tool schemas to find exact parameter names and output fields
+- Prefer get-default-* for standard resources (faster, simpler)
+- Use list-* when you need to choose from multiple options
+
+═══════════════════════════════════════════════════════════════════
+🏗️ RESOURCE CREATION PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+PATTERN 1: EC2 INSTANCE
+Requires: AMI, VPC, Subnet, Security Group
+
+Discovery Phase (steps 1-4):
+- Discover VPC
+- Discover Subnet
+- Discover AMI
+- Discover Security Group
+
+PATTERN 2: APPLICATION LOAD BALANCER
+Requires: VPC, Subnets (2+ in different AZs), Security Group, Target Group
+
+Discovery Phase:
+- Discover VPC
+- Discover Subnets
+
+Creation Phase:
+1. Create Security Group (with HTTP rules)
+2. Create Target Group
+3. Create Load Balancer
+4. Create Listener
+
+═══════════════════════════════════════════════════════════════════
+🔄 MODIFY ACTION PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+Use "modify" action to UPDATE existing resources.
+
+MODIFY ACTION USE CASES:
+├─ State Changes: start-ec2-instance, stop-ec2-instance, start-db-instance, stop-db-instance
+├─ Capacity Updates: update-auto-scaling-group (change desired capacity)
+├─ Instance Modifications: modify-ec2-instance-type (change instance size - requires stopped instance - need to start after modified)
+└─ Future: modify-security-group-rule (upsert operations)
+
+Update ASG Capacity:
+{
+  "id": "step-scale-asg",
+  "name": "Scale auto scaling group",
+  "description": "Update ASG desired capacity to 5 instances",
+  "action": "modify",
+  "resourceId": "web-servers-asg",
+  "mcpTool": "update-auto-scaling-group",
+  "toolParameters": {
+    "asgName": "web-servers-asg",
+    "desiredCapacity": 5
+  },
+  "dependsOn": ["step-create-asg"],
+  "status": "pending"
+}
+
+Start EC2 Instance:
+{
+  "id": "step-start-instance",
+  "name": "Start web server instance",
+  "description": "Change instance state to running",
+  "action": "modify",
+  "resourceId": "web-server-1",
+  "mcpTool": "start-ec2-instance",
+  "toolParameters": {
+    "instanceId": "{{step-create-instance.instanceId}}"
+  },
+  "dependsOn": ["step-create-instance"],
+  "status": "pending"
+}
+
+═══════════════════════════════════════════════════════════════════
+🎯 PARAMETER RESOLUTION PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+SINGLE VALUE REFERENCE:
+When a tool requires a single resource ID, reference the discovery step output:
+
+{
+  "toolParameters": {
+    "vpcId": "{{step-discover-vpc.vpcId}}",
+    "subnetId": "{{step-discover-subnet.subnetId}}",
+    "imageId": "{{step-discover-ami.imageId}}"
+  }
+}
+
+ARRAY VALUE REFERENCE:
+When a tool accepts multiple IDs (subnets, security groups):
+
+{
+  "toolParameters": {
+    "subnetIds": [
+      "{{step-discover-subnet-1.subnetId}}",
+      "{{step-discover-subnet-2.subnetId}}"
+    ],
+    "securityGroupIds": [
+      "{{step-discover-sg.securityGroupId}}"
+    ]
+  }
+}
+
+ARN REFERENCE:
+For resources that use ARNs (load balancers, target groups):
+
+{
+  "toolParameters": {
+    "loadBalancerArn": "{{step-create-alb.loadBalancerArn}}",
+    "targetGroupArn": "{{step-create-tg.targetGroupArn}}"
+  }
+}
+
+═══════════════════════════════════════════════════════════════════
+⚠️ CRITICAL REMINDERS
+═══════════════════════════════════════════════════════════════════
+
+1. ALL query steps MUST be placed FIRST in execution plan
+2. Discovery steps have NO dependencies (dependsOn: [])
+3. Only reference previous steps in the execution order
+4. Use exact field names from tool output schemas
+5. For multi-value parameters, always use arrays
+6. Include ALL referenced steps in dependsOn array
+7. Use only "create" and "query" actions
+
+═══════════════════════════════════════════════════════════════════

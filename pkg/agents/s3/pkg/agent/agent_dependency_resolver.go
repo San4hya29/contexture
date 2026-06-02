@@ -1,0 +1,267 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// ========== Interface defines ==========
+
+// DependencyResolverInterface defines dependency resolution and parameter management functionality
+//
+// Available Functions:
+//   - resolveDependencyReference()        : Resolve references like {{step-1.resourceId}}
+//   - resolveFromInfrastructureState()    : Resolve values from infrastructure state
+//   - validateNativeMCPArguments()        : Validate arguments against tool schema
+//
+// This file handles dependency resolution between plan steps, parameter
+// validation, and state-based value resolution for infrastructure operations.
+//
+// Usage Example:
+//   1. resolvedValue, err := agent.resolveDependencyReference("{{step-1.resourceId}}")
+//   2. value, err := agent.resolveFromInfrastructureState(stepID, field, ref, idx)
+//   3. err := agent.validateNativeMCPArguments(toolName, arguments, toolInfo)
+
+// ========== Dependency Resolution and Parameter Management Functions ==========
+
+// resolveDependencyReference resolves references like {{step-1.resourceId}} to actual resource IDs
+func (a *StateAwareAgent) resolveDependencyReference(reference string) (string, error) {
+	a.Logger.WithField("reference", reference).Debug("Starting dependency reference resolution")
+
+	// Extract step ID from reference like {{step-1.resourceId}} or {{step-1.resourceId}}[0]
+	if !strings.HasPrefix(reference, "{{") || (!strings.HasSuffix(reference, "}}") && !strings.Contains(reference, "}[")) {
+		return reference, nil // Not a reference
+	}
+
+	// Handle bracket notation first: {{step-1.resourceId}}[0] -> convert to {{step-1.resourceId.0}}
+	if strings.Contains(reference, "}[") {
+		// Pattern: {{step-1.resourceId}}[0]
+		bracketPos := strings.Index(reference, "}[")
+		if bracketPos > 0 {
+			beforeBracket := reference[:bracketPos+1] // {{step-1.resourceId}}
+			afterBracket := reference[bracketPos+2:]  // 0]
+
+			if strings.HasSuffix(afterBracket, "]") {
+				indexStr := strings.TrimSuffix(afterBracket, "]")
+				if _, err := strconv.Atoi(indexStr); err == nil {
+					// Convert {{step-1.resourceId}}[0] to {{step-1.resourceId.0}}
+					convertedRef := strings.TrimSuffix(beforeBracket, "}}") + "." + indexStr + "}}"
+
+					return a.resolveDependencyReference(convertedRef)
+				}
+			}
+		}
+	}
+
+	refContent := strings.TrimSuffix(strings.TrimPrefix(reference, "{{"), "}}")
+
+	parts := strings.Split(refContent, ".")
+
+	// Support multiple reference formats: {{step-1.resourceId}}, {{step-1}}, {{step-1.targetGroupArn}}, {{step-1.resourceId.0}}, {{step-1.resourceId.[0]}}, etc.
+	var stepID string
+	var requestedField string
+	var lenReference int = -1
+
+	if len(parts) == 3 {
+		// Format: {{step-1.resourceId.0}} or {{step-1.resourceId.[0]}} - array indexing
+		stepID = parts[0]
+		requestedField = parts[1]
+
+		// Handle both formats: "0" and "[0]"
+		indexPart := parts[2]
+		if strings.HasPrefix(indexPart, "[") && strings.HasSuffix(indexPart, "]") {
+			// Format: {{step-1.resourceId.[0]}}
+			indexStr := strings.TrimPrefix(strings.TrimSuffix(indexPart, "]"), "[")
+			if idx, err := strconv.Atoi(indexStr); err == nil {
+				lenReference = idx
+			} else {
+				return "", fmt.Errorf("invalid array index in reference: %s (expected numeric index)", reference)
+			}
+		} else if idx, err := strconv.Atoi(indexPart); err == nil {
+			// Format: {{step-1.resourceId.0}}
+			lenReference = idx
+		} else {
+			return "", fmt.Errorf("invalid array index in reference: %s (expected numeric index)", reference)
+		}
+	} else if len(parts) == 2 {
+		stepID = parts[0]
+		requestedField = parts[1]
+	} else if len(parts) == 1 {
+		stepID = parts[0]
+		requestedField = "resourceId" // Default to resourceId for backward compatibility
+	} else {
+		return "", fmt.Errorf("invalid reference format: %s (expected {{step-id.field}}, {{step-id.field.index}}, or {{step-id}})", reference)
+	}
+
+	a.mappingsMutex.RLock()
+
+	// Handle array indexing - check for specific indexed mapping first
+	if lenReference >= 0 {
+		indexedKey := fmt.Sprintf("%s.%d", stepID, lenReference)
+		if indexedValue, indexedExists := a.resourceMappings[indexedKey]; indexedExists {
+			a.mappingsMutex.RUnlock()
+
+			return indexedValue, nil
+		}
+	}
+
+	// Check for field-specific mapping (e.g., step-id.zones)
+	if requestedField != "resourceId" {
+		fieldKey := fmt.Sprintf("%s.%s", stepID, requestedField)
+		if fieldValue, fieldExists := a.resourceMappings[fieldKey]; fieldExists {
+			a.mappingsMutex.RUnlock()
+
+			// If this is an array field (concatenated) and we have an index, split it
+			if lenReference >= 0 && strings.Contains(fieldValue, "_") {
+				parts := strings.Split(fieldValue, "_")
+				if lenReference < len(parts) {
+					return parts[lenReference], nil
+				}
+				return "", fmt.Errorf("array index %d out of bounds for field %s (length: %d)", lenReference, requestedField, len(parts))
+			}
+
+			return fieldValue, nil
+		}
+	}
+
+	// Check for primary resource ID mapping (only if requestedField is "resourceId" or default)
+	if requestedField == "resourceId" {
+		resourceID, exists := a.resourceMappings[stepID]
+		a.mappingsMutex.RUnlock()
+
+		// If mapping exists return it directly
+		if exists {
+			return resourceID, nil
+		}
+	} else {
+		a.mappingsMutex.RUnlock()
+	}
+
+	// For all other cases (no mapping exists OR specific field requested), resolve from infrastructure state
+	if a.testMode {
+		// In test mode, avoid accessing real state - rely only on stored mappings
+		return "", fmt.Errorf("dependency reference not found in test mode: %s (step ID: %s, field: %s not found in resource mappings)", reference, stepID, requestedField)
+	}
+
+	// Resolve from infrastructure state (handles both missing mappings and specific field requests)
+	resolvedID, err := a.resolveFromInfrastructureState(stepID, lenReference)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve dependency %s for step %s: %w", reference, stepID, err)
+	}
+
+	return resolvedID, nil
+}
+
+// resolveFromInfrastructureState attempts to resolve a dependency reference by parsing the infrastructure state
+func (a *StateAwareAgent) resolveFromInfrastructureState(stepID string, lenReference int) (string, error) {
+	stateJSON, err := a.ExportInfrastructureState(context.Background(), false) // Only managed state
+	if err != nil {
+		return "", fmt.Errorf("failed to export infrastructure state: %w", err)
+	}
+
+	var stateData map[string]interface{}
+	if err := json.Unmarshal([]byte(stateJSON), &stateData); err != nil {
+		return "", fmt.Errorf("failed to parse state JSON: %w", err)
+	}
+
+	managedState, ok := stateData["managed_state"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("managed_state not found in state data")
+	}
+
+	resources, ok := managedState["resources"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("resources not found in managed_state")
+	}
+
+	resource, ok := resources[stepID].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("resource not found for step ID: %s", stepID)
+	}
+
+	// Extract AWS resource ID from the resource properties
+	properties, ok := resource["properties"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("properties not found in resource")
+	}
+
+	unified, ok := properties["unified"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unified not found in properties")
+	}
+
+	// Handle array indexing
+	if lenReference >= 0 {
+		// Check if this is an array resource with ResourceIds
+		if depType, ok := unified["dependencyReferenceType"].(string); ok && depType == "array" {
+			if resourceIds, ok := unified["resourceIds"].([]interface{}); ok {
+				if lenReference < len(resourceIds) {
+					if id, ok := resourceIds[lenReference].(string); ok && id != "" {
+						// Cache it for future use
+						indexedKey := fmt.Sprintf("%s.%d", stepID, lenReference)
+						a.mappingsMutex.Lock()
+						a.resourceMappings[indexedKey] = id
+						a.mappingsMutex.Unlock()
+
+						return id, nil
+					}
+				}
+				return "", fmt.Errorf("array index %d out of bounds for ResourceIds (length: %d)", lenReference, len(resourceIds))
+			}
+		}
+		return "", fmt.Errorf("resource is not an array type or ResourceIds not found")
+	}
+
+	// For non-indexed requests, always use resourceId
+	if resourceId, ok := unified["resourceId"].(string); ok && resourceId != "" {
+		// Cache it for future use
+		a.mappingsMutex.Lock()
+		a.resourceMappings[stepID] = resourceId
+		a.mappingsMutex.Unlock()
+
+		return resourceId, nil
+	}
+
+	return "", fmt.Errorf("resourceId not found in unified for step %s", stepID)
+}
+
+// validateNativeMCPArguments validates arguments against the tool's schema
+func (a *StateAwareAgent) validateNativeMCPArguments(toolName string, arguments map[string]interface{}, toolInfo MCPToolInfo) error {
+	if toolInfo.InputSchema == nil {
+		return nil // No schema to validate against
+	}
+
+	properties, ok := toolInfo.InputSchema["properties"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Get required fields
+	requiredFields := make(map[string]bool)
+	if required, ok := toolInfo.InputSchema["required"].([]interface{}); ok {
+		for _, field := range required {
+			if fieldStr, ok := field.(string); ok {
+				requiredFields[fieldStr] = true
+			}
+		}
+	}
+
+	// Validate required fields are present and non-empty
+	for paramName := range properties {
+		if requiredFields[paramName] {
+			val, exists := arguments[paramName]
+			if !exists || val == nil {
+				return fmt.Errorf("required parameter %s is missing for tool %s", paramName, toolName)
+			}
+			// Check for empty strings
+			if strVal, ok := val.(string); ok && strVal == "" {
+				return fmt.Errorf("required parameter %s is empty for tool %s", paramName, toolName)
+			}
+		}
+	}
+
+	return nil
+}

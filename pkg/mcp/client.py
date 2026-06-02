@@ -12,7 +12,6 @@ OLLAMA_API_URL = "http://localhost:11434"
 MODEL_NAME = "qwen2.5-coder:14b"  # replace with your model
 
 
-import httpx
 
 async def ask_ollama_stream(prompt: str):
     """
@@ -49,7 +48,7 @@ async def ask_ollama(prompt: str) -> str:
         resp = await session.post(
             f"{OLLAMA_API_URL}/v1/completions",
             json={
-                "model": "qwen2.5-coder:14b",
+                "model": MODEL_NAME,
                 "prompt": prompt,
                 "max_tokens": 1000,
                 "temperature": 0.0
@@ -74,7 +73,6 @@ async def llm_to_tool_call(nl_query: str) -> dict:
     llm_response = re.sub(r"```(?:json)?", "", llm_response.strip())
     try:
         return json.loads(llm_response)
-        print("Json Call Loaded")
     except json.JSONDecodeError:
         return {"tool_name": nl_query.strip(), "params": {}}
 
