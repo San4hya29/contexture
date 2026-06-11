@@ -15,10 +15,11 @@ Tools follow the design of established open-source PostgreSQL MCP servers:
 ```
 pkg/agents/postgres/
 ├── server.py              # FastMCP entry point — all @app.tool() definitions
-├── postgres_connector.py  # psycopg2-based query helpers
+├── postgres_connector.py  # psycopg2-based query helpers (read-only connections)
 ├── mcp_tools.py           # Tool wrapper functions (callable without the server)
 ├── tool_registry.py       # TOOLS dict — mirrors mongodb/tool_registry.py
 ├── agent.py               # Keyword-based NL query router — mirrors mongodb/agent.py
+├── test_connection.py     # Quick connectivity test — run this first
 ├── requirements.txt       # Python dependencies
 └── README.md
 
@@ -37,10 +38,10 @@ Ollama (local LLM)
 client_dynamic.py / client_dynamic_ui.py
       │  call_tool(name, params)
       ▼
-server.py  (FastMCP — port 8003)
+server.py  (FastMCP — default port 8003)
       │  @app.tool() handlers
       ▼
-postgres_connector.py  (psycopg2)
+postgres_connector.py  (psycopg2, read-only connections)
       │  SQL queries
       ▼
 PostgreSQL
@@ -48,6 +49,8 @@ PostgreSQL
 
 The flow is identical to how the Prometheus MCP server works (port 8001).  
 The OCS engine fetches context from `/get_ocs_prompt`, the LLM converts the NL query into a list of tool calls, and the FastMCP client executes them against this server.
+
+All connections are opened with `default_transaction_read_only=on` — the server never writes to or modifies any data.
 
 ---
 
@@ -61,18 +64,22 @@ The OCS engine fetches context from `/get_ocs_prompt`, the LLM converts the NL q
 | `pg_list_tables` | Tables and views in a given schema |
 | `pg_describe_table` | Columns, types, primary keys, indexes |
 | `pg_execute_query` | Run a SELECT / WITH query, returns rows |
-| `pg_explain_query` | EXPLAIN ANALYZE output for a query |
+| `pg_explain_query` | EXPLAIN (ANALYZE, BUFFERS) output for a SELECT query |
 | `pg_get_table_stats` | Live rows, dead rows, sizes, vacuum/analyze timestamps |
 | `pg_get_db_stats` | Cache hit ratio, commits, rollbacks, deadlocks from pg_stat_database |
-| `pg_get_slow_queries` | Top slow queries via pg_stat_statements (extension required) |
+| `pg_get_slow_queries` | Top slow queries via pg_stat_statements (extension required — see note below) |
 
 All tools iterate over every instance in `postgres_config.yaml` and return results keyed by instance name — same pattern as the Prometheus tools returning `*_per_prometheus`.
+
+> **Note on `pg_get_slow_queries`:** Requires the `pg_stat_statements` extension.  
+> Enable it by adding `pg_stat_statements` to `shared_preload_libraries` in `postgresql.conf` and running `CREATE EXTENSION pg_stat_statements;`. The tool returns an informative error if the extension is absent.  
+> Supports PostgreSQL 12 and 13+ (handles the `total_time` → `total_exec_time` column rename automatically).
 
 ---
 
 ## Configuration
 
-Edit `config/postgres_config.yaml` (created at the project config root):
+Edit `config/postgres_config.yaml` at the project root:
 
 ```yaml
 postgres_instances:
@@ -94,9 +101,13 @@ postgres_instances:
   #   sslmode: "require"
 ```
 
+All fields follow the same pattern as `config/prometheus_config.yaml`.
+
 ---
 
 ## Getting Started
+
+All commands below are run from the `pkg/agents/postgres/` directory.
 
 ### 1. Install dependencies
 
@@ -108,25 +119,53 @@ pip install -r requirements.txt
 ### 2. Configure the connection
 
 ```bash
-# Edit the config at project root
+# Edit the config at the project root (two levels up)
 vi ../../config/postgres_config.yaml
 ```
 
-### 3. Run the MCP server
+### 3. Test the connection
 
-**HTTP/SSE transport** (recommended — matches how the Prometheus server runs):
+Before starting the server, verify the config and connection are working:
 
 ```bash
-uvicorn server:app --port 8003
+python test_connection.py
 ```
 
-**stdio transport** (for direct MCP client use):
+Expected output:
+
+```
+Loading postgres_config.yaml...
+Found 1 instance(s): ['local']
+--------------------------------------------------
+Instance : local
+Host     : localhost:5432
+Database : postgres
+User     : postgres
+Connection: OK
+Databases (3):
+  - mydb     [UTF8]  8192 kB
+  - postgres [UTF8]  8209 kB
+  - template1 [UTF8] 7953 kB
+Schemas   : public
+--------------------------------------------------
+All instances OK.
+```
+
+### 4. Run the MCP server
+
+**stdio transport** (default — matches how FastMCP runs in the rest of Contexture):
 
 ```bash
 python server.py
 ```
 
-### 4. Wire it into the Contexture client
+**SSE/HTTP transport** (for use with `client_dynamic.py` over HTTP):
+
+```bash
+python server.py --transport sse --port 8003
+```
+
+### 5. Wire it into the Contexture client
 
 In `config/mcp_server_config.yaml`, add the postgres server URL alongside the Prometheus one:
 
@@ -139,25 +178,25 @@ Then update `pkg/mcp/client_dynamic.py` to connect to the postgres server when p
 
 ---
 
-## Using as a Standalone Tool (Alternative)
+## Using the Upstream Open-Source Server (Alternative)
 
-If you prefer to run the upstream open-source server directly instead of this wrapper:
+If you prefer to run `crystaldba/postgres-mcp` directly instead of this wrapper:
 
 ```bash
-# Install crystaldba/postgres-mcp
+# Install
 pip install postgres-mcp
 
-# Run it (stdio transport, compatible with any MCP client)
+# Run (stdio transport, compatible with any MCP client)
 postgres-mcp --db-url "postgresql://postgres:password@localhost:5432/mydb"
 
 # Or with uvx (no install needed)
 uvx postgres-mcp --db-url "postgresql://postgres:password@localhost:5432/mydb"
 ```
 
-This provides a subset of the same tools. The `server.py` in this folder adds:
-- Multi-instance support (query multiple PostgreSQL servers at once)
-- Config-file based connection management (consistent with the rest of Contexture)
-- OCS-aligned tool naming and output shape
+The `server.py` in this folder adds on top of that:
+- **Multi-instance support** — query multiple PostgreSQL servers in one call
+- **Config-file based connections** — consistent with the rest of Contexture
+- **OCS-aligned tool naming and output shape**
 
 ---
 

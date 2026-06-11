@@ -7,10 +7,10 @@
 #   - crystaldba/postgres-mcp  (https://github.com/crystaldba/postgres-mcp)
 #   - modelcontextprotocol/servers/src/postgres  (https://github.com/modelcontextprotocol/servers)
 #
-# Run:
-#   cd pkg/agents/postgres
-#   uvicorn server:app --port 8003   # HTTP/SSE transport (for client_dynamic.py)
-#   python server.py                 # stdio transport
+# Run (always from the pkg/agents/postgres/ directory):
+#   python server.py                          # stdio transport (default)
+#   python server.py --transport sse          # SSE/HTTP on port 8003
+#   python server.py --transport sse --port 9000  # custom port
 
 import os
 import yaml
@@ -297,4 +297,24 @@ def pg_check_db_health() -> Dict[str, Any]:
 # ── entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PostgreSQL MCP Server for SODA Contexture")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="MCP transport type (default: stdio)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8003,
+        help="Port for SSE transport (default: 8003)",
+    )
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        app.run(transport="sse", port=args.port)
+    else:
+        app.run()

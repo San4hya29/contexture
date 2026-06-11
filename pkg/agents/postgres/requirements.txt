@@ -1,3 +1,4 @@
-fastmcp
-psycopg2-binary
-pyyaml
+# Match versions from the project root requirements.txt where applicable.
+fastmcp==0.2.0
+psycopg2-binary>=2.9,<3.0
+PyYAML==6.0.2

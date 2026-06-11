@@ -28,7 +28,14 @@ def _load_config() -> List[Dict]:
 
 
 def _get_conn(instance: Dict) -> psycopg2.extensions.connection:
-    """Open a psycopg2 connection for a given config instance."""
+    """
+    Open a read-only psycopg2 connection for a given config instance.
+
+    ``default_transaction_read_only=on`` is enforced at the session level so
+    that even CTEs containing DML (e.g. ``WITH x AS (DELETE ...) SELECT ...``)
+    are rejected by PostgreSQL — not just by the client-side prefix check in
+    ``execute_query``.
+    """
     return psycopg2.connect(
         host=instance.get("host", "localhost"),
         port=instance.get("port", 5432),
@@ -37,6 +44,7 @@ def _get_conn(instance: Dict) -> psycopg2.extensions.connection:
         dbname=instance.get("dbname", "postgres"),
         sslmode=instance.get("sslmode", "disable"),
         cursor_factory=psycopg2.extras.RealDictCursor,
+        options="-c default_transaction_read_only=on",
     )
 
 
@@ -168,11 +176,20 @@ def execute_query(instance: Dict, sql: str, limit: int = 100) -> Tuple[List[Dict
 
 
 def explain_query(instance: Dict, sql: str) -> List[str]:
-    """Return EXPLAIN ANALYZE output for a query."""
+    """
+    Return EXPLAIN (ANALYZE, BUFFERS) output for a SELECT or WITH query.
+
+    Only SELECT/WITH queries are accepted — EXPLAIN ANALYZE actually executes
+    the statement, so we validate the SQL before running it.
+    """
+    normalized = sql.strip().upper()
+    if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
+        raise ValueError("Only SELECT / WITH queries are allowed in explain_query.")
+
     conn = _get_conn(instance)
     try:
         with conn.cursor() as cur:
-            cur.execute(f"EXPLAIN ANALYZE {sql}")
+            cur.execute(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql}")
             return [row[0] for row in cur.fetchall()]
     finally:
         conn.close()
@@ -239,28 +256,39 @@ def get_slow_queries(instance: Dict, min_duration_ms: float = 100.0, limit: int 
     """
     Return top slow queries from pg_stat_statements.
     Requires the pg_stat_statements extension to be enabled.
+
+    Handles the column rename introduced in PostgreSQL 13:
+      - PostgreSQL ≤12: total_time / mean_time / stddev_time
+      - PostgreSQL ≥13: total_exec_time / mean_exec_time / stddev_exec_time
     """
     conn = _get_conn(instance)
     try:
         with conn.cursor() as cur:
             # Check extension exists first
-            cur.execute("""
-                SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
-            """)
+            cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'")
             if not cur.fetchone():
                 return [{"error": "pg_stat_statements extension is not enabled on this server."}]
 
-            cur.execute("""
+            # Detect PostgreSQL version to handle column name change in pg13
+            cur.execute("SELECT current_setting('server_version_num')::int AS ver")
+            pg_ver = cur.fetchone()["ver"]
+
+            if pg_ver >= 130000:
+                total_col, mean_col, stddev_col = "total_exec_time", "mean_exec_time", "stddev_exec_time"
+            else:
+                total_col, mean_col, stddev_col = "total_time", "mean_time", "stddev_time"
+
+            cur.execute(f"""
                 SELECT
-                    left(query, 200)                             AS query_preview,
+                    left(query, 200)                               AS query_preview,
                     calls,
-                    round(total_exec_time::numeric, 2)           AS total_exec_ms,
-                    round(mean_exec_time::numeric,  2)           AS mean_exec_ms,
-                    round(stddev_exec_time::numeric, 2)          AS stddev_exec_ms,
+                    round({total_col}::numeric,  2)                AS total_exec_ms,
+                    round({mean_col}::numeric,   2)                AS mean_exec_ms,
+                    round({stddev_col}::numeric, 2)                AS stddev_exec_ms,
                     rows
                 FROM  pg_stat_statements
-                WHERE mean_exec_time >= %s
-                ORDER BY mean_exec_time DESC
+                WHERE {mean_col} >= %s
+                ORDER BY {mean_col} DESC
                 LIMIT %s
             """, (min_duration_ms, limit))
             return [dict(r) for r in cur.fetchall()]
