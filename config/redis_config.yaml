@@ -6,7 +6,7 @@ redis:
   db: 0
 
 llm:
-  provider: "ollama"
-  model: "qwen3:14b"
+  provider: ""
+  model: ""
   api_key: ""
-  base_url: "http://4.247.140.236:11434/api/chat"
+  base_url: ""
