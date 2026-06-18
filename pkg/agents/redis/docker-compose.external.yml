@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  # Run only the Copilot container, connecting to your existing Redis database.
+  # No Redis image is pulled or run. All connection and LLM configurations
+  # are read directly from the config/config.yaml file mounted as a volume.
+  copilot:
+    build: .
+    container_name: redis-ai-copilot-external
+    volumes:
+      - ../../../config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

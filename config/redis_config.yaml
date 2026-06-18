@@ -1,0 +1,12 @@
+redis:
+  host: "localhost"
+  port: 6379
+  username: ""
+  password: ""
+  db: 0
+
+llm:
+  provider: "ollama"
+  model: "qwen3:14b"
+  api_key: ""
+  base_url: "http://4.247.140.236:11434/api/chat"

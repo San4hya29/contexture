@@ -1,0 +1,55 @@
+keys:
+  user:1:
+    type: hash
+    fields:
+      name: "Alice Smith"
+      email: "alice@example.com"
+      age: "30"
+      status: "active"
+  user:2:
+    type: hash
+    fields:
+      name: "Bob Jones"
+      email: "bob@example.com"
+      age: "25"
+      status: "suspended"
+  cache:product:101:
+    type: string
+    value: "{\"id\": 101, \"name\": \"Sleek Laptop\", \"price\": 999.99}"
+    ttl: 3600
+  cache:product:102:
+    type: string
+    value: "{\"id\": 102, \"name\": \"Wireless Mouse\", \"price\": 29.99}"
+    ttl: 1800
+  cart:user:1:
+    type: set
+    members:
+      - "cache:product:101"
+      - "cache:product:102"
+  wishlist:user:2:
+    type: set
+    members:
+      - "cache:product:101"
+  order_queue:
+    type: list
+    items:
+      - "order:9001"
+      - "order:9002"
+  high_score_buyers:
+    type: zset
+    scores:
+      user:1: 1500
+      user:2: 450
+  purchase_stream:
+    type: stream
+    entries:
+      - id: "*"
+        fields:
+          user_id: "user:1"
+          amount: "1029.98"
+          timestamp: "1718181600"
+      - id: "*"
+        fields:
+          user_id: "user:2"
+          amount: "29.99"
+          timestamp: "1718182000"
