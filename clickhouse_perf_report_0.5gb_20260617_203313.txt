@@ -1,0 +1,34 @@
+========================================================================
+  CLICKHOUSE PERFORMANCE REPORT
+  Generated: 2026-06-17 20:33:13
+========================================================================
+
+INSERTION METRICS
+------------------------------------------------------------------------
+  Target size          : 0.50 GB
+  Rows inserted        :       5,368,709
+  Total rows in table  :       5,368,709
+  Elapsed time         :           77.3 s  (1.29 min)
+  Insertion rate       :         69,432 rows/s
+  Disk size (compressed):      34.97 MiB
+  Uncompressed size    :     119.86 MiB
+
+QUERY PERFORMANCE BENCHMARKS  (3 runs each)
+------------------------------------------------------------------------
+  Query                         avg ms     min ms     max ms
+  -------------------------  ---------  ---------  ---------
+  count_all                        4.7        3.6        5.4  🟢 fast
+  group_by_source                128.3       88.7      204.6  🟢 fast
+  group_by_pair                  244.5      185.6      353.4  🟡 ok
+  last_7_days                     18.6       18.3       19.3  🟢 fast
+  last_1_day                      10.5        9.1       12.4  🟢 fast
+  distinct_sources               176.2      157.6      204.9  🟢 fast
+  top_pairs_last_week            129.7      107.8      153.7  🟢 fast
+  time_series_hourly              52.6       45.7       58.5  🟢 fast
+
+COMPRESSION ANALYSIS
+------------------------------------------------------------------------
+  Avg compressed bytes/row : 6.83 bytes
+  Compression ratio        : 14.6x
+
+========================================================================
