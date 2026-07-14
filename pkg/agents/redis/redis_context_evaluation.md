@@ -18,7 +18,6 @@ The comparison illustrates how this contextual information drastically improves 
 | **Dataset** | Sample E-Commerce Dataset (`ecommerce.yaml`) |
 | **LLM** | Qwen3:14b (Ollama) |
 | **Execution Mode** | MCP Agent |
-| **Context Mode** | Enabled vs. Disabled |
 
 ---
 
@@ -32,32 +31,6 @@ The generated context contains three major components:
 
 ### 📋 Sample Context Structure
 
-#### Entities
-*   **User**: Shopper accounts stored in Redis.
-*   **Cart**: Products currently selected for purchase.
-*   **Wishlist**: Products saved for later.
-*   **Product**: Cached product metadata stored as JSON.
-*   **Purchase**: Purchase transaction records.
-*   **Order**: Pending purchase orders awaiting processing.
-
-#### Key Semantics
-
-| Key Pattern | Data Type | Description |
-| :--- | :--- | :--- |
-| `user:*` | Hash | Stores user information such as name, email, age, and status. |
-| `cart:user:*` | Set | Contains products currently added to a user's cart. |
-| `wishlist:user:*` | Set | Contains products saved for later by a user. |
-| `cache:product:*` | String (JSON) | Stores cached product metadata (name, price, etc.) as JSON. |
-| `high_score_buyers` | Sorted Set (zset) | Sorted set ranking users by total purchase value. |
-| `purchase_stream` | Stream | Stream containing purchase transactions. |
-| `order_queue` | List | Queue containing pending order IDs. |
-
-#### Business Rules
-*   Only active users may checkout.
-*   Orders are immutable after creation.
-*   Cache keys have custom TTL bounds (e.g., 1800–3600 seconds).
-
-### 🖼️ Example Business Context Definition (YAML)
 Below is the visual structure of how the business context maps entities, key semantics, and rules:
 
 ```yaml
@@ -94,9 +67,8 @@ business_rules:
 
 ## 📊 Evaluation Results
 
-### 1. 🛑 Without Redis Context
+### 1. Without Redis Context
 
-> [!WARNING]
 > Without semantic descriptions, the LLM often struggles to map relationship links between keys, falls back to raw listing outputs, or fails to fetch dynamic values within key objects.
 
 *   **Query**:
@@ -140,9 +112,8 @@ business_rules:
 
 ---
 
-### 2. 🟢 With Redis Context
+### 2. With Redis Context
 
-> [!NOTE]
 > Enriched context allows the planner to understand nested formats (such as JSON strings inside string keys), use correct structural instructions (e.g. `hgetall` for user hashes), and correctly cross-reference sets between users.
 
 *   **Query**:
