@@ -1,0 +1,187 @@
+============================================================
+  MySQL MCP Chatbot — How to Run
+============================================================
+
+Prerequisites:
+  - Docker installed
+  - Python 3 with virtual environment (.venv)
+  - Project root: /home/niteesh/contexture-clean
+
+
+Step 1: Start MySQL (Docker)
+──────────────────────────────────
+  docker run -d --name contexture-mysql \
+    -e MYSQL_ROOT_PASSWORD=root \
+    -p 3306:3306 \
+    mysql:8.0
+
+  Wait a few seconds for MySQL to be ready. Verify:
+  docker exec contexture-mysql mysql -uroot -proot -e "SELECT version()"
+
+
+Step 2: Load E-commerce OCS Schema
+───────────────────────────────────
+  docker exec -i contexture-mysql mysql -uroot -proot < scripts/mysql/ecommerce_ocs_schema.sql
+
+  This creates:
+    - Database: ecommerce
+    - Tables: customers (5 rows), products (5 rows), orders (7 rows)
+
+
+Step 3: Start the MySQL MCP Server
+────────────────────────────────────────
+  source .venv/bin/activate
+  python3 pkg/agents/mysql/server.py --transport sse --port 8005
+
+  Keep this running in a separate terminal.
+  Server will be available at: http://localhost:8005/sse
+
+  MCP Tools exposed:
+    my_list_databases, my_list_tables, my_describe_table,
+    my_execute_query, my_get_table_stats, my_get_db_stats,
+    my_get_slow_queries, my_check_db_health
+
+
+Step 4: Run the NL Chatbot (in another terminal)
+─────────────────────────────────────────────────
+  source .venv/bin/activate
+  python3 scripts/mysql/chatbot.py
+
+  The chatbot connects to MySQL through the MCP Server (not directly).
+
+  Data flow:
+    User NL Query
+      → Chatbot (NL → SQL via Ollama or offline regex)
+      → FastMCP Client (SSE transport)
+      → MySQL MCP Server (port 8005)
+      → my_execute_query tool
+      → MySQL DB (port 3306)
+      → Results → Formatted Table → Terminal
+
+
+Example Queries & Results
+──────────────────────────
+
+  Query: list of all customers with at least 2 orders
+
+  ╭────────┬───────────────────┬────────┬───────────────╮
+  │ name   │ email             │ city   │   order_count │
+  ├────────┼───────────────────┼────────┼───────────────┤
+  │ Rahul  │ rahul@example.com │ Mumbai │             2 │
+  │ Priya  │ priya@example.com │ Delhi  │             2 │
+  ╰────────┴───────────────────┴────────┴───────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: what products did Rahul buy
+
+  ╭────────────┬───────────┬─────────────┬───────┬──────────────╮
+  │ customer   │ product   │ category    │   qty │ order_date   │
+  ├────────────┼───────────┼─────────────┼───────┼──────────────┤
+  │ Rahul      │ Laptop    │ Electronics │     1 │ 2026-06-15   │
+  │ Rahul      │ Mouse     │ Electronics │     2 │ 2026-06-16   │
+  ╰────────────┴───────────┴─────────────┴───────┴──────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: total revenue per category
+
+  ╭─────────────┬─────────────────╮
+  │ category    │   total_revenue │
+  ├─────────────┼─────────────────┤
+  │ Electronics │          165500 │
+  │ Stationery  │            1000 │
+  ╰─────────────┴─────────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: show all orders
+
+  ╭────────────┬────────────┬────────────┬────────────┬─────────┬─────────┬──────────────╮
+  │   order_id │ customer   │ product    │   quantity │   price │   total │ order_date   │
+  ├────────────┼────────────┼────────────┼────────────┼─────────┼─────────┼──────────────┤
+  │       1001 │ Rahul      │ Laptop     │          1 │   75000 │   75000 │ 2026-06-15   │
+  │       1002 │ Rahul      │ Mouse      │          2 │    1500 │    3000 │ 2026-06-16   │
+  │       1003 │ Priya      │ Keyboard   │          1 │    3000 │    3000 │ 2026-06-16   │
+  │       1004 │ Priya      │ Headphones │          1 │    5000 │    5000 │ 2026-06-17   │
+  │       1005 │ Amit       │ Notebook   │          5 │     200 │    1000 │ 2026-06-17   │
+  │       1006 │ Sneha      │ Laptop     │          1 │   75000 │   75000 │ 2026-06-18   │
+  │       1007 │ Vikram     │ Mouse      │          3 │    1500 │    4500 │ 2026-06-18   │
+  ╰────────────┴────────────┴────────────┴────────────┴─────────┴─────────┴──────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: top 3 customers by total spending
+
+  ╭──────────┬───────────────╮
+  │ name     │   total_spent │
+  ├──────────┼───────────────┤
+  │ Rahul    │         78000 │
+  │ Sneha    │         75000 │
+  │ Priya    │          8000 │
+  ╰──────────┴───────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: which city has the most orders
+
+  ╭───────────┬───────────────╮
+  │ city      │   order_count │
+  ├───────────┼───────────────┤
+  │ Delhi     │             2 │
+  │ Mumbai    │             2 │
+  │ Chennai   │             1 │
+  │ Hyderabad │             1 │
+  │ Bangalore │             1 │
+  ╰───────────┴───────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: average order value
+
+  ╭──────────┬───────────────────╮
+  │ name     │   avg_order_value │
+  ├──────────┼───────────────────┤
+  │ Sneha    │             75000 │
+  │ Rahul    │             39000 │
+  │ Vikram   │              4500 │
+  │ Priya    │              4000 │
+  │ Amit     │              1000 │
+  ╰──────────┴───────────────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: list all products
+
+  ╭──────────────┬────────────┬─────────────┬─────────┬─────────╮
+  │   product_id │ name       │ category    │   price │   stock │
+  ├──────────────┼────────────┼─────────────┼─────────┼─────────┤
+  │          101 │ Laptop     │ Electronics │   75000 │      50 │
+  │          102 │ Mouse      │ Electronics │    1500 │     200 │
+  │          103 │ Keyboard   │ Electronics │    3000 │     150 │
+  │          104 │ Headphones │ Electronics │    5000 │     100 │
+  │          105 │ Notebook   │ Stationery  │     200 │     500 │
+  ╰──────────────┴────────────┴─────────────┴─────────┴─────────╯
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+  Query: how many orders total
+
+  ╭────────────────╮
+  │   total_orders │
+  ├────────────────┤
+  │              7 │
+  ╰────────────────╯
+
+
+Key Files
+─────────
+  MCP Server:      pkg/agents/mysql/server.py
+  MCP Connector:   pkg/agents/mysql/mysql_connector.py
+  MCP Client:      pkg/mcp/client_dynamic.py
+  NL Chatbot:      scripts/mysql/chatbot.py
+  DB Schema:       scripts/mysql/ecommerce_ocs_schema.sql
+  DB Config:       config/mysql_config.yaml
+  MCP Config:      config/mcp_server_config.yaml
+
+============================================================
