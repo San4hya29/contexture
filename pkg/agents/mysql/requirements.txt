@@ -1,4 +1,4 @@
 # Match versions from the project root requirements.txt where applicable.
-fastmcp==0.2.0
+fastmcp>=0.2.0
 mysql-connector-python>=8.0.0,<9.0.0
 PyYAML==6.0.2

@@ -1,0 +1,75 @@
+version: "3.9"
+
+# ============================================================================
+#  SODA Contexture — MySQL Agent Stack
+#
+#  Services:
+#   1. mysql       — MySQL database server (port 3306)
+#   2. mysql-mcp   — FastMCP agent for MySQL (port 8005 SSE)
+#   3. mysql-init  — One-shot container that runs the schema initialization
+#
+#  Usage:
+#    docker compose -f pkg/agents/mysql/docker-compose.yml up --build
+#    docker compose -f pkg/agents/mysql/docker-compose.yml down -v
+# ============================================================================
+
+services:
+
+  # ── 1. MySQL Database ───────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: contexture-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "root"
+      MYSQL_DATABASE: "test_db"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── 2. Schema Init (one-shot) ───────────────────────────────────────────────
+  mysql-init:
+    image: mysql:8.0
+    container_name: contexture-mysql-init
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ../../../scripts/mysql/ecommerce_ocs_schema.sql:/init.sql:ro
+    command: >
+      sh -c "mysql -h mysql -u root -proot < /init.sql && echo 'Schema initialised successfully.'"
+    restart: on-failure
+
+  # ── 3. MySQL MCP Agent ──────────────────────────────────────────────────────
+  mysql-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: contexture-mysql-mcp
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8005:8005"    # FastMCP SSE endpoint — matches mcp_server_config.yaml
+    volumes:
+      - ../../../config:/config:ro     # Mount root config/ so agent finds mysql_config.yaml
+    environment:
+      # Override the YAML config host to use the Docker service name
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ecommerce
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql-data:

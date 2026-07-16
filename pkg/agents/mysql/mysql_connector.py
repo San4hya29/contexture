@@ -28,12 +28,18 @@ def _load_config() -> List[Dict]:
 
 def _get_connection(instance: Dict) -> mysql.connector.MySQLConnection:
     """Open a MySQL connection for a given config instance."""
+    host = os.environ.get("MYSQL_HOST") or instance.get("host", "localhost")
+    port = int(os.environ.get("MYSQL_PORT") or instance.get("port", 3306))
+    user = os.environ.get("MYSQL_USER") or instance.get("username", "root")
+    password = os.environ.get("MYSQL_PASSWORD") or instance.get("password", "")
+    database = os.environ.get("MYSQL_DATABASE") or instance.get("database", "")
+
     return mysql.connector.connect(
-        host=instance.get("host", "localhost"),
-        port=instance.get("port", 3306),
-        user=instance.get("username", "root"),
-        password=instance.get("password", ""),
-        database=instance.get("database", ""),
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        database=database,
     )
 
 

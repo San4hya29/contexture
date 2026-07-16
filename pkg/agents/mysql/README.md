@@ -1,111 +1,47 @@
 # MySQL MCP Agent
 
 A MySQL data-connector agent for [SODA Contexture](https://github.com/sodafoundation/contexture).  
-Exposes MySQL databases, tables, and query execution as MCP tools via [FastMCP](https://github.com/jlowin/fastmcp),
-following the same pattern as the ClickHouse and PostgreSQL agents.
+Exposes MySQL databases, tables, and query execution as MCP tools via [FastMCP](https://github.com/jlowin/fastmcp).
 
 ---
 
-## File Structure
+## How to Run
 
-```
-pkg/agents/mysql/
-├── agent.py                  # Natural-language query router
-├── mysql_connector.py        # Low-level MySQL connection & queries
-├── mcp_tools.py              # Tool wrapper functions (callable without server)
-├── server.py                 # FastMCP server exposing all tools
-├── test_connection.py        # Quick connectivity test
-├── tool_registry.py          # Central TOOLS registry
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+The easiest way to run the MySQL agent (including a local database, schema initialization, and the MCP agent itself) is using the provided Docker stack and `run_mysql.bat` launcher from the repository root.
 
-config/
-└── mysql_config.yaml         # MySQL instance connection settings
-```
+### 1. Start the Stack
 
----
-
-## Setup
-
-### 1. Install dependencies
+From the root of the repository, run:
 
 ```bash
-cd pkg/agents/mysql
-pip install -r requirements.txt
+.\run_mysql.bat up
 ```
 
-### 2. Configure MySQL connection
+This will:
+- Start a MySQL 8.0 database on port `3306`.
+- Automatically seed the database with the `ecommerce` schema.
+- Build and start the `contexture-mysql-mcp` FastMCP agent on `http://localhost:8005/sse`.
 
-Edit `config/mysql_config.yaml` at the repo root:
+### 2. Interactive NL Chatbot
 
-```yaml
-mysql_instances:
-  - name: local
-    host: "localhost"
-    port: 3306
-    database: "test_db"
-    username: "root"
-    password: ""
-```
+An interactive terminal-based Natural Language chatbot is provided in `scripts/mysql/chatbot.py`. It uses Ollama to translate natural language into SQL against the MySQL `ecommerce` schema, and routes it through the MCP Server.
 
-### 3. Test the connection
+To use it, ensure the stack is running (`.\run_mysql.bat up`), then run:
 
 ```bash
-cd pkg/agents/mysql
-python test_connection.py
+py scripts\mysql\chatbot.py
 ```
 
----
+**Try asking it:**
+- *"List all customers"*
+- *"What products did Rahul buy?"*
+- *"Total revenue per category"*
+- *"Top 3 customers by total spending"*
+- *"Which city has the most orders?"*
+- *"Average order value per customer"*
 
-## Running the MCP Server
+### 3. Stop the Stack
 
 ```bash
-cd pkg/agents/mysql
-
-# stdio transport (default — for use with MCP clients)
-python server.py
-
-# SSE/HTTP transport on port 8005
-python server.py --transport sse
-
-# SSE on a custom port
-python server.py --transport sse --port 9000
+.\run_mysql.bat down
 ```
-
----
-
-## Available MCP Tools
-
-| Tool | Description |
-|---|---|
-| `my_list_databases` | List all databases on the MySQL server |
-| `my_list_tables` | List tables in a database with row count and size |
-| `my_describe_table` | Show columns, types, keys, and storage info for a table |
-| `my_execute_query` | Run a read-only SELECT query |
-| `my_get_table_stats` | Storage stats: size, engine, indexes, collation |
-| `my_get_db_stats` | Server-level status variables (connections, threads) |
-| `my_get_slow_queries` | Top slow queries from `performance_schema` |
-| `my_check_db_health` | Version, uptime, connections, running threads |
-
----
-
-## Docker (local MySQL)
-
-Start a local MySQL instance:
-
-```bash
-docker run -d --name contexture-mysql \
-  -e MYSQL_ROOT_PASSWORD=root \
-  -e MYSQL_DATABASE=test_db \
-  -p 3306:3306 \
-  mysql:8.0
-```
-
----
-
-## See Also
-
-- [ClickHouse Agent](../clickhouse/README.md)
-- [PostgreSQL Agent](../postgres/README.md)
-- [MongoDB Agent](../mongodb/README.md)
-- [MySQL Documentation](https://dev.mysql.com/doc/)
