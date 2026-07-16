@@ -1,0 +1,7 @@
+mysql_instances:
+  - name: local
+    host: "localhost"
+    port: 3306
+    database: "contexture_mysql_test"
+    username: "root"
+    password: "root"
