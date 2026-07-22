@@ -1,0 +1,8 @@
+# Match versions from the project root requirements.txt where applicable.
+fastmcp>=0.2.0
+prometheus-api-client>=0.5.3
+PyYAML>=6.0
+pandas>=1.5.0
+numpy>=1.24.0
+httpx>=0.24.0
+prometheus-remote-writer>=0.1.0
