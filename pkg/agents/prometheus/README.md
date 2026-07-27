@@ -133,22 +133,35 @@ python contexture-fork/contexture/scratch/seed_mongo.py [custom_context_file.jso
 Run the following processes concurrently (each terminal should have the shared virtual environment `venv` active):
 
 #### Terminal 1: Start Prometheus MCP Server (Port 8001)
-
+* **Linux/WSL**:
   ```bash
   export PYTHONPATH=contexture-fork/contexture/pkg/agents/prometheus
   python contexture-fork/contexture/pkg/agents/prometheus/server.py --transport sse --port 8001
   ```
-
-
-#### Terminal 2: Start UI Backend Gateway (Port 8000)
-Run the gateway server with inline configuration settings (no `.env` file required):
-
-  ```bash
-  USE_REAL_AGENT=true TS_AGENT_PATH=$(pwd)/contexture-fork/contexture python -m uvicorn contexture-ui.backend.main:app --reload --port 8000
+* **Windows (PowerShell)**:
+  ```powershell
+  $env:PYTHONPATH="contexture-fork/contexture/pkg/agents/prometheus"
+  python contexture-fork/contexture/pkg/agents/prometheus/server.py --transport sse --port 8001
   ```
 
+#### Terminal 2: Start Copilot Backend (Port 8002)
+This runs the core reasoning client that coordinates with the MCP server:
+```bash
+python -m pkg.mcp.client_dynamic_ui
+```
 
-#### Terminal 3: Start React Frontend (Port 5173)
+#### Terminal 3: Start UI Backend Gateway (Port 8003)
+Start the proxy gateway server on port 8003 (matching the React frontend configuration):
+* **Linux/WSL**:
+  ```bash
+  USE_REAL_AGENT=true TS_AGENT_PATH=$(pwd)/contexture-fork/contexture python contexture-ui/backend/main.py
+  ```
+* **Windows (PowerShell)**:
+  ```powershell
+  $env:USE_REAL_AGENT="true"; $env:TS_AGENT_PATH="$pwd\contexture-fork\contexture"; python contexture-ui/backend/main.py
+  ```
+
+#### Terminal 4: Start React Frontend (Port 5173)
 Start the web development server to view the interface:
 ```bash
 cd contexture-ui/frontend

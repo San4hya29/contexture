@@ -244,11 +244,20 @@ func BuildContextDefinitions(ctx context.Context, adjacencyList connectors.Adjac
 		// Extract dependency topology relationships from static configuration & dynamic metrics
 		topoRelationships := buildTopology(adjacencyList, workload)
 
+		resolvedSearchTerm := workload
+		if workload == "frontend" {
+			resolvedSearchTerm = "manager-ui"
+		} else if workload == "backend" {
+			resolvedSearchTerm = "ollama"
+		} else if workload == "db" {
+			resolvedSearchTerm = "clickhouse"
+		}
+
 		// Discover dynamic Kubernetes Topology details
 		var topologyProv string
 		var topologySource []string
 		if discoverer != nil {
-			details, sources := discoverer.DiscoverTopologyDetails(ctx, workload)
+			details, sources := discoverer.DiscoverTopologyDetails(ctx, resolvedSearchTerm)
 			if len(sources) > 0 {
 				topologyProv = "observed"
 				topologySource = sources
@@ -268,6 +277,14 @@ func BuildContextDefinitions(ctx context.Context, adjacencyList connectors.Adjac
 		labelsCombined := make(map[string]string)
 		for k, v := range cfg.DimensionalityAndTopology.LabelsTags {
 			labelsCombined[k] = v
+		}
+		// Set correct app label mapping inside context spec based on workload
+		if workload == "frontend" {
+			labelsCombined["app"] = "manager-ui"
+		} else if workload == "backend" {
+			labelsCombined["app"] = "ollama"
+		} else if workload == "db" {
+			labelsCombined["app"] = "chi-clickhouse-cluster"
 		}
 
 		parentChildLinksCombined := make(map[string]interface{})
