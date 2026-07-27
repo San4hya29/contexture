@@ -29,6 +29,7 @@ type Repository struct {
 	client              *mongo.Client
 	adjacencyCollection *mongo.Collection
 	redisCollection     *mongo.Collection
+	isOffline           bool
 }
 
 // NewRepository creates a new MongoDB repository
@@ -43,16 +44,18 @@ func NewRepository() (*Repository, error) {
 		dbName = "ocs"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+		log.Printf("Warning: failed to connect to MongoDB: %v. Running in offline store mode.", err)
+		return &Repository{isOffline: true}, nil
 	}
 
 	if err := client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+		log.Printf("Warning: failed to ping MongoDB: %v. Running in offline store mode.", err)
+		return &Repository{isOffline: true}, nil
 	}
 
 	database := client.Database(dbName)
@@ -86,11 +89,15 @@ func NewRepository() (*Repository, error) {
 		client:              client,
 		adjacencyCollection: database.Collection("workload_adjacency"),
 		redisCollection:     redisCollection,
+		isOffline:           false,
 	}, nil
 }
 
 // Close closes the MongoDB connection
 func (r *Repository) Close() error {
+	if r.isOffline {
+		return nil
+	}
 	if r.client != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -101,6 +108,9 @@ func (r *Repository) Close() error {
 
 // GetLatestAdjacencyList returns the most recent adjacency list
 func (r *Repository) GetLatestAdjacencyList() (map[string][]string, error) {
+	if r.isOffline {
+		return make(map[string][]string), nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -119,6 +129,9 @@ func (r *Repository) GetLatestAdjacencyList() (map[string][]string, error) {
 
 // SaveAdjacencyList persists an adjacency list and returns its document ID
 func (r *Repository) SaveAdjacencyList(adjacencyList map[string][]string) (primitive.ObjectID, error) {
+	if r.isOffline {
+		return primitive.NewObjectID(), nil
+	}
 	totalConnections := 0
 	for _, dests := range adjacencyList {
 		totalConnections += len(dests)
@@ -150,6 +163,9 @@ func (r *Repository) SaveAdjacencyList(adjacencyList map[string][]string) (primi
 
 // GetLatestRedisContext returns the most recent Redis context document.
 func (r *Repository) GetLatestRedisContext() (*rediscontext.Context, error) {
+	if r.isOffline {
+		return nil, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -168,6 +184,9 @@ func (r *Repository) GetLatestRedisContext() (*rediscontext.Context, error) {
 
 // SaveRedisContext persists a Redis metadata snapshot and returns its document ID.
 func (r *Repository) SaveRedisContext(redisCtx *rediscontext.Context) (primitive.ObjectID, error) {
+	if r.isOffline {
+		return primitive.NewObjectID(), nil
+	}
 	if redisCtx == nil {
 		return primitive.NilObjectID, fmt.Errorf("redis context is nil")
 	}
@@ -193,4 +212,26 @@ func (r *Repository) SaveRedisContext(redisCtx *rediscontext.Context) (primitive
 	}
 	log.Printf("Saved Redis context to MongoDB with ID: %s", objectID.Hex())
 	return objectID, nil
+}
+
+// SaveOCSContext persists the fully built OCS context definitions to MongoDB.
+func (r *Repository) SaveOCSContext(contextDefinitions interface{}) error {
+	if r.isOffline {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	coll := r.client.Database("ocs").Collection("ocs_context_definitions")
+	doc := bson.M{
+		"context_definitions": contextDefinitions,
+		"timestamp":           time.Now(),
+	}
+
+	_, err := coll.InsertOne(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("failed to save OCS context definitions: %w", err)
+	}
+	log.Printf("Successfully saved OCS context definitions to MongoDB")
+	return nil
 }

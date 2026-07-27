@@ -20,6 +20,7 @@ type Store interface {
 	SaveAdjacencyList(adjacencyList map[string][]string) (primitive.ObjectID, error)
 	GetLatestRedisContext() (*rediscontext.Context, error)
 	SaveRedisContext(redisCtx *rediscontext.Context) (primitive.ObjectID, error)
+	SaveOCSContext(contextDefinitions interface{}) error
 	Close() error
 }
 
@@ -29,17 +30,19 @@ type Server struct {
 	connector      connectors.Connector
 	redisCollector *rediscollector.Collector
 	store          Store
+	prometheusURL  string
 	cancel         context.CancelFunc
 }
 
 // New creates a new server with the given connector and store
-func New(ocsConfig *config.OCSConfig, connector connectors.Connector, redisCollector *rediscollector.Collector, repo Store) *Server {
+func New(ocsConfig *config.OCSConfig, connector connectors.Connector, redisCollector *rediscollector.Collector, repo Store, prometheusURL string) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		ocsConfig:      ocsConfig,
 		connector:      connector,
 		redisCollector: redisCollector,
 		store:          repo,
+		prometheusURL:  prometheusURL,
 		cancel:         cancel,
 	}
 	s.startBackgroundTasks(ctx)
@@ -117,6 +120,9 @@ func (s *Server) RedisCollector() *rediscollector.Collector { return s.redisColl
 // Store returns the repository
 func (s *Server) Store() Store { return s.store }
 
+// PrometheusURL returns the Prometheus base URL
+func (s *Server) PrometheusURL() string { return s.prometheusURL }
+
 // MustNewServer creates a new server by loading config and initializing connector and store.
 // It is intended for use from main. For tests, use New with injected dependencies.
 func MustNewServer(connector connectors.Connector) *Server {
@@ -125,6 +131,14 @@ func MustNewServer(connector connectors.Connector) *Server {
 		log.Fatalf("load OCS config: %v", err)
 	}
 	log.Printf("Loaded OCS config")
+
+	promConfig, err := config.LoadPrometheus()
+	var prometheusURL string
+	if err != nil {
+		log.Printf("Warning: load Prometheus config: %v. Running without live Prometheus metadata.", err)
+	} else if len(promConfig.PrometheusInstances) > 0 {
+		prometheusURL = promConfig.PrometheusInstances[0].BaseURL
+	}
 
 	repo, err := store.NewRepository()
 	if err != nil {
@@ -136,5 +150,5 @@ func MustNewServer(connector connectors.Connector) *Server {
 		log.Printf("Redis collector not initialized: %v", err)
 	}
 
-	return New(ocsConfig, connector, redisCollector, repo)
+	return New(ocsConfig, connector, redisCollector, repo, prometheusURL)
 }

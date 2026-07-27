@@ -28,9 +28,15 @@ func (s *Server) GetOCSPromptHandler(c *gin.Context) {
 		adjacencyList = make(connectors.AdjacencyList)
 	}
 
-	contextDefinitions := prompt.BuildContextDefinitions(adjacencyList, s.ocsConfig)
+	var discoverer *prompt.PrometheusDiscoverer
+	if s.prometheusURL != "" {
+		discoverer = prompt.NewPrometheusDiscoverer(s.prometheusURL)
+	}
+
+	contextDefinitions := prompt.BuildContextDefinitions(c.Request.Context(), adjacencyList, s.ocsConfig, discoverer)
+	_ = s.store.SaveOCSContext(contextDefinitions)
 	response := config.OCSPromptResponse{
-		SpecVersion:        "0.1",
+		SpecVersion:        "1.0.0",
 		ContextDefinitions: contextDefinitions,
 	}
 	c.JSON(http.StatusOK, response)
