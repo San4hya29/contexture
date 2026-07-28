@@ -88,6 +88,22 @@ metrics:
       polarity: "low_is_bad"
       aggregator: "average"
 
+  - name: "kube_pod_container_status_restarts_total"
+    semantics:
+      descriptive_name: "Container Restarts Total"
+      unit: "restarts"
+      type: "counter"
+      description: "Total number of container restarts"
+    temporal:
+      granularity_resolution: "10-second intervals"
+      retention_policy: "15d"
+    constraints:
+      thresholds:
+        warning: 1.0
+        critical: 5.0
+      polarity: "high_is_bad"
+      aggregator: "max"
+
 workload:
   - db
   - backend

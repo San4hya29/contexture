@@ -112,6 +112,8 @@ async def llm_to_workflow(nl_query: str) -> list:
         "- pod_restart_trend(window: str = '30m', top_n: int = 5)\n"
         "- detect_pod_anomalies(metric_name='container_cpu_usage_seconds_total', z_threshold=3.0)\n"
         "- detect_crashloop_pods(window='10m', threshold=2)\n"
+        "- detect_restart_anomalies(window: str = '24h', threshold: int = 2) (Use this when the user asks for restart anomalies in pods or container restart counts)\n"
+        "- namespace_resource_summary(resource: str = 'cpu', window: str = '5m') (Use this when the user asks to compare development vs. production workloads, or namespace resource footprints/summaries)\n"
         "- pod_event_timeline(pod_name: str, window: str = '30m')\n"
         "- node_condition_summary()\n"
         "- query_custom_metric_range(metric_name: str, window: str = '30d') (Use this when the user asks for a specific metric name like kube_node_status_capacity_cpu_cores or any other custom raw metric over a past window)\n\n"

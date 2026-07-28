@@ -65,79 +65,79 @@ type PrometheusConfig struct {
 
 // IdentityAndOrigin represents the OCS Identity & Origin dimension
 type IdentityAndOrigin struct {
-	Who   map[string]interface{} `json:"who"`
-	Where map[string]interface{} `json:"where"`
+	Who   map[string]interface{} `json:"who" bson:"who"`
+	Where map[string]interface{} `json:"where" bson:"where"`
 }
 
 // DimensionalityAndTopology represents the OCS Dimensionality & Topology dimension
 type DimensionalityAndTopology struct {
-	NodeType      string                 `json:"node_type"`
-	Relationships map[string]interface{} `json:"relationships"`
+	NodeType      string                 `json:"nodetype" bson:"nodetype"`
+	Relationships map[string]interface{} `json:"relationships" bson:"relationships"`
 }
 
 // MetricSemanticInfo represents the OCS Metric Semantics dimension
 type MetricSemanticInfo struct {
-	Name        string                 `json:"name"`
-	Type        string                 `json:"type"`
-	Unit        string                 `json:"unit"`
-	Description string                 `json:"description"`
-	Semantics   map[string]interface{} `json:"semantics,omitempty"`
+	Name        string                 `json:"name" bson:"name"`
+	Type        string                 `json:"type" bson:"type"`
+	Unit        string                 `json:"unit" bson:"unit"`
+	Description string                 `json:"description" bson:"description"`
+	Semantics   map[string]interface{} `json:"semantics,omitempty" bson:"semantics,omitempty"`
 }
 
 // TemporalBehaviorInfo represents temporal logic/aggregations for a specific metric
 type TemporalBehaviorInfo struct {
-	Mode                string `json:"mode"`
-	AggregationDuration string `json:"aggregation_duration,omitempty"`
-	Description         string `json:"description,omitempty"`
+	Mode                string `json:"mode" bson:"mode"`
+	AggregationDuration string `json:"aggregation_duration,omitempty" bson:"aggregation_duration,omitempty"`
+	Description         string `json:"description,omitempty" bson:"description,omitempty"`
 }
 
 // TemporalContext represents the OCS Temporal Context dimension
 type TemporalContext struct {
-	Timestamp         string                          `json:"timestamp,omitempty"`
-	TimeWindowMinutes int                             `json:"time_window_minutes"`
-	SampleInterval    string                          `json:"sample_interval,omitempty"`
-	TemporalBehavior  map[string]TemporalBehaviorInfo `json:"temporal_behavior,omitempty"`
+	Timestamp         string                          `json:"timestamp,omitempty" bson:"timestamp,omitempty"`
+	TimeWindowMinutes int                             `json:"timewindowminutes" bson:"timewindowminutes"`
+	SampleInterval    string                          `json:"sampleinterval,omitempty" bson:"sampleinterval,omitempty"`
+	TemporalBehavior  map[string]TemporalBehaviorInfo `json:"temporalbehavior,omitempty" bson:"temporalbehavior,omitempty"`
 }
 
 // HealthConfigConstraint represents health thresholds/interpretation rules
 type HealthConfigConstraint struct {
-	MetricName        string                 `json:"metric_name"`
-	AggregationLogic  string                 `json:"aggregation_logic,omitempty"`
-	WarningThreshold  float64                `json:"warning_threshold,omitempty"`
-	CriticalThreshold float64                `json:"critical_threshold,omitempty"`
-	Polarity          string                 `json:"polarity,omitempty"`
-	ContextCriteria   map[string]interface{} `json:"context_criteria,omitempty"`
-	Description       string                 `json:"description,omitempty"`
+	MetricName        string                 `json:"metricname" bson:"metricname"`
+	AggregationLogic  string                 `json:"aggregationlogic,omitempty" bson:"aggregationlogic,omitempty"`
+	WarningThreshold  float64                `json:"warningthreshold,omitempty" bson:"warningthreshold,omitempty"`
+	CriticalThreshold float64                `json:"criticalthreshold,omitempty" bson:"criticalthreshold,omitempty"`
+	Polarity          string                 `json:"polarity,omitempty" bson:"polarity,omitempty"`
+	ContextCriteria   map[string]interface{} `json:"contextcriteria,omitempty" bson:"contextcriteria,omitempty"`
+	Description       string                 `json:"description,omitempty" bson:"description,omitempty"`
 }
 
 // OperationalConstraints represents the OCS Operational Constraints dimension
 type OperationalConstraints struct {
-	HealthConfig []HealthConfigConstraint `json:"health_config,omitempty"`
-	Policies     []string                 `json:"policies,omitempty"`
+	HealthConfig []HealthConfigConstraint `json:"healthconfig,omitempty" bson:"healthconfig,omitempty"`
+	Policies     []string                 `json:"policies,omitempty" bson:"policies,omitempty"`
 }
 
 // ProvenanceEntry captures the lineage of a context fact
 type ProvenanceEntry struct {
-	Value      interface{} `json:"value,omitempty"`
-	Provenance string      `json:"provenance"` // observed, derived, configured, policy, unknown
-	Source     interface{} `json:"source,omitempty"`     // e.g. string or []string
+	Value      interface{} `json:"value,omitempty" bson:"value,omitempty"`
+	Provenance string      `json:"provenance" bson:"provenance"` // observed, derived, configured, policy, unknown
+	Source     interface{} `json:"source,omitempty" bson:"source,omitempty"`     // e.g. string or []string
 }
 
 // OCSContextDefinition represents a context definition in the OCS prompt response
 type OCSContextDefinition struct {
-	ResourceID                string                    `json:"resource_id"`
-	Domain                    string                    `json:"domain"`
-	IdentityAndOrigin         IdentityAndOrigin         `json:"identity_and_origin"`
-	DimensionalityAndTopology DimensionalityAndTopology `json:"dimensionality_and_topology"`
-	MetricSemantics           []MetricSemanticInfo      `json:"metric_semantics"`
-	TemporalContext           TemporalContext           `json:"temporal_context"`
-	OperationalConstraints    OperationalConstraints    `json:"operational_constraints"`
-	ProvenanceMap             map[string]ProvenanceEntry `json:"provenance_map,omitempty"`
+	ResourceID                string                     `json:"resourceid" bson:"resourceid"`
+	Domain                    string                     `json:"domain" bson:"domain"`
+	IdentityAndOrigin         IdentityAndOrigin          `json:"identityandorigin" bson:"identityandorigin"`
+	DimensionalityAndTopology DimensionalityAndTopology  `json:"dimensionalityandtopology" bson:"dimensionalityandtopology"`
+	MetricSemantics           []MetricSemanticInfo       `json:"metricsemantics" bson:"metricsemantics"`
+	TemporalContext           TemporalContext            `json:"temporalcontext" bson:"temporalcontext"`
+	OperationalConstraints    OperationalConstraints     `json:"operationalconstraints" bson:"operationalconstraints"`
+	ProvenanceMap             map[string]ProvenanceEntry `json:"provenance_map,omitempty" bson:"provenance_map,omitempty"`
 }
 
 // OCSPromptResponse represents the OCS prompt response structure
 type OCSPromptResponse struct {
-	SpecVersion        string                 `json:"spec_version"`
-	ContextDefinitions []OCSContextDefinition `json:"context_definitions"`
+	SpecVersion        string                 `json:"spec_version" bson:"spec_version"`
+	ContextDefinitions []OCSContextDefinition `json:"context_definitions" bson:"context_definitions"`
 }
 

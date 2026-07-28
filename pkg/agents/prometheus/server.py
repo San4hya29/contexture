@@ -406,6 +406,54 @@ def pod_status_summary() -> Dict[str, Any]:
 
 
 @app.tool()
+def list_all_pods(namespace: Optional[str] = None) -> Dict[str, Any]:
+    """
+    List all Kubernetes pods with their namespace, node, and phase.
+    Uses kube_pod_info to enumerate every pod in the cluster.
+
+    Args:
+        namespace: Optional namespace filter (e.g. 'default'). If empty, returns all namespaces.
+    """
+    all_results = {}
+    for inst in _instances():
+        name = inst["name"]
+        client = get_client(inst)
+        try:
+            if namespace:
+                query = f'kube_pod_info{{namespace="{namespace}"}}'
+            else:
+                query = "kube_pod_info"
+            result = client.custom_query(query=query)
+            pods = []
+            seen = set()
+            for item in result:
+                metric = item.get("metric", {})
+                pod_name = metric.get("pod", "")
+                if pod_name in seen:
+                    continue
+                seen.add(pod_name)
+                pods.append({
+                    "pod": pod_name,
+                    "namespace": metric.get("namespace", ""),
+                    "node": metric.get("node", ""),
+                    "created_by_kind": metric.get("created_by_kind", ""),
+                    "created_by_name": metric.get("created_by_name", ""),
+                })
+            pods.sort(key=lambda x: (x["namespace"], x["pod"]))
+            all_results[name] = {
+                "total_pods": len(pods),
+                "pods": pods,
+            }
+        except Exception as e:
+            all_results[name] = {"error": str(e)}
+
+    return {
+        "list_all_pods_per_prometheus": all_results,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.tool()
 def recent_pod_events(limit: int = 10) -> Dict[str, Any]:
     """
     Return the most recent Kubernetes pod events (by reason + object).

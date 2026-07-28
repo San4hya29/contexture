@@ -62,20 +62,28 @@ def clean_and_shrink_spec(spec_dict: dict) -> dict:
     cleaned = copy.deepcopy(spec_dict)
     if "context_definitions" in cleaned:
         for definition in cleaned["context_definitions"]:
-            if "provenance_map" in definition:
-                del definition["provenance_map"]
-            if "dimensionality_and_topology" in definition:
-                topo = definition["dimensionality_and_topology"]
-                if "relationships" in topo and topo["relationships"]:
-                    rels = topo["relationships"]
-                    for key in ["containers", "nodes", "namespaces", "pod_owners", "pods"]:
-                        if key in rels and isinstance(rels[key], list):
-                            # Truncate lists to avoid overloading Ollama context window
-                            rels[key] = rels[key][:2]
-            if "temporal_context" in definition:
-                temp_ctx = definition["temporal_context"]
-                if "timestamp" in temp_ctx:
-                    del temp_ctx["timestamp"]
+            # Remove provenance map
+            for pkey in ["provenance_map", "provenancemap"]:
+                if pkey in definition:
+                    del definition[pkey]
+            
+            # Truncate topology lists
+            for tkey in ["dimensionality_and_topology", "dimensionalityandtopology"]:
+                if tkey in definition:
+                    topo = definition[tkey]
+                    if "relationships" in topo and topo["relationships"]:
+                        rels = topo["relationships"]
+                        for key in ["containers", "nodes", "namespaces", "pod_owners", "pods"]:
+                            if key in rels and isinstance(rels[key], list):
+                                # Truncate lists to avoid overloading Ollama context window
+                                rels[key] = rels[key][:2]
+            
+            # Clean temporal context
+            for temp_key in ["temporal_context", "temporalcontext"]:
+                if temp_key in definition:
+                    temp_ctx = definition[temp_key]
+                    if "timestamp" in temp_ctx:
+                        del temp_ctx["timestamp"]
     return cleaned
 
 def format_relevant_context_as_ocs_spec(relevant_context) -> dict:
@@ -248,7 +256,9 @@ async def llm_to_workflow(nl_query: str) -> list:
         "- top_n_pods_by_metric(metric_name: str = 'container_cpu_usage_seconds_total', top_n: int = 5, window: str = '5m')\n"
         "- pods_exceeding_cpu(threshold: float = 0.8)\n"
         "- pods_exceeding_memory(threshold_bytes: float = 1073741824)\n"
-        "- pod_status_summary() (Use this when the user asks to list pods, show pod status, or list all Kubernetes pods)\n"
+        "- pod_status_summary() (Use this when the user asks to list pods, show pod status, or list all Kubernetes pods)"
+        " - NOTE: returns aggregate COUNTS only, not individual pod names\n"
+        "- list_all_pods(namespace: Optional[str] = None) (Use this when the user asks to list all pods, enumerate pods, or list pod names - returns individual pod names with namespace and node)\n"
         "- node_disk_usage(window_minutes: int = 20)\n"
         "- node_memory_usage(window_minutes: int = 20)\n"
         "- describe_cluster_health()\n"
@@ -257,6 +267,8 @@ async def llm_to_workflow(nl_query: str) -> list:
         "- pod_restart_trend(window: str = '30m', top_n: int = 5)\n"
         "- detect_pod_anomalies(metric_name='container_cpu_usage_seconds_total', z_threshold=3.0)\n"
         "- detect_crashloop_pods(window='10m', threshold=2)\n"
+        "- detect_restart_anomalies(window: str = '24h', threshold: int = 2) (Use this when the user asks for restart anomalies in pods or container restart counts)\n"
+        "- namespace_resource_summary(resource: str = 'cpu', window: str = '5m') (Use this when the user asks to compare development vs. production workloads, or namespace resource footprints/summaries)\n"
         "- pod_event_timeline(pod_name: str, window: str = '30m')\n"
         "- node_condition_summary()\n"
         "- query_custom_metric_range(metric_name: str, window: str = '30d') (Use this when the user asks for a specific metric name like kube_node_status_capacity_cpu_cores or any other custom raw metric over a past window)\n\n"
@@ -388,11 +400,20 @@ async def run_query(nl_query: str) -> tuple:
         filtered_defs = []
         has_workload_match = False
         for d in context_defs:
-            res_id = d.get("resource_id", "").lower()
+            res_id = d.get("resourceid", d.get("resource_id", "")).lower()
             if not target_entities or "prometheus" in target_entities or "all" in target_entities:
                 filtered_defs.append(d)
             else:
-                matches = [te for te in target_entities if te in res_id]
+                workload = d.get("identityandorigin", {}).get("who", {}).get("workload", "").lower()
+                topo = d.get("dimensionalityandtopology", d.get("dimensionality_and_topology", {}))
+                rels = topo.get("relationships", {}) if isinstance(topo, dict) else {}
+                pods = rels.get("pods", []) if isinstance(rels, dict) else []
+                pods_str = " ".join([p.lower() for p in pods if isinstance(p, str)])
+                
+                matches = []
+                for te in target_entities:
+                    if te in res_id or te in workload or te in pods_str:
+                        matches.append(te)
                 if matches:
                     filtered_defs.append(d)
                     has_workload_match = True
@@ -413,29 +434,79 @@ async def run_query(nl_query: str) -> tuple:
         # Fallback to legacy context from MongoDB
         ocs_prompt_dict = format_relevant_context_as_ocs_spec(relevant_context)
     ocs_prompt = json.dumps(clean_and_shrink_spec(ocs_prompt_dict))
+    # Truncate OCS prompt to avoid overwhelming small LLMs with huge context
+    if len(ocs_prompt) > 2500:
+        ocs_prompt = ocs_prompt[:2500] + "... [truncated for brevity]"
+
 
     results = await execute_workflow(workflow)
-    # print("\nTool call results:")
-    """for r in results:
-        print(r)"""
+
+    # Format results to be clean, unescaped, and highly readable for the LLM
+    def safe_extract_data(r: dict) -> str:
+        """Extract the cleanest possible data payload from an MCP tool result."""
+        try:
+            res_data = r.get("result", {})
+            # Try structured_content first (cleanest)
+            data = None
+            if isinstance(res_data, dict):
+                data = res_data.get("structured_content") or res_data.get("data")
+                if not data and "content" in res_data:
+                    for c in res_data.get("content", []):
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            try:
+                                data = json.loads(c.get("text", ""))
+                                break
+                            except Exception:
+                                data = c.get("text")
+                                break
+            else:
+                # MCP object — try attribute access
+                data = getattr(res_data, "structured_content", None) or getattr(res_data, "data", None)
+                if not data:
+                    content = getattr(res_data, "content", [])
+                    for c in content:
+                        text = getattr(c, "text", None)
+                        if text:
+                            try:
+                                data = json.loads(text)
+                            except Exception:
+                                data = text
+                            break
+            if data is None:
+                data = str(res_data)
+            try:
+                return json.dumps(data, indent=2, default=str)
+            except Exception:
+                return str(data)
+        except Exception as ex:
+            return f"(Could not parse result: {ex})"
+
+    formatted_results_list = []
+    for r in results:
+        tool_name = r.get("tool_name", "unknown")
+        formatted_results_list.append(f"Tool Executed: {tool_name}")
+        formatted_results_list.append(f"Output Data:\n{safe_extract_data(r)}")
+        formatted_results_list.append("-" * 40)
+
+    clean_results_str = "\n".join(formatted_results_list)
 
     summary_prompt = (
-        f"Analyze these tool call results: {results}\n"
+        f"Analyze these tool call results:\n{clean_results_str}\n\n"
         "Provide a polished, professional diagnostic report structured with these Markdown headers:\n\n"
         "### 📊 Executive Summary\n"
         "(A clean 1-2 sentence overview of the system state and findings)\n\n"
         "### 📈 Telemetry Insights & SLA Verification\n"
-        "(A clear bulleted list comparing raw telemetry values numerically against OCS critical thresholds from the specification, stating compliance status)\n\n"
+        "(Format all retrieved telemetry metric values, trends, status counts, or metadata labels in a clean, highly readable bulleted list. State compliance status relative to the OCS spec if applicable. DO NOT use markdown tables or graph representations)\n\n"
         "### 🔗 Topology Diagnostics\n"
         "(Diagnostic analysis of dependencies along the workload path if topology is present in the context, showing potential root-cause directions)\n\n"
         "### 💡 Recommendations\n"
         "(Bullet points recommending next steps based strictly on findings)\n\n"
         f"Context specification: {ocs_prompt}\n\n"
         "Rules:\n"
+        "- Print the actual tool results data faithfully. If the tool returned counts (like Failed: 9, Running: 138), you must print them directly under Telemetry Insights. DO NOT make up metrics or report false errors if the tool succeeded.\n"
         "- If any tool result contains an 'error' key, state clearly that the tool execution failed with that error.\n"
-        "- If the tool results are successful but do not contain SLA metric telemetry (e.g. they contain pod status counts, event lists, or node capacities), present the retrieved telemetry data directly in 'Telemetry Insights', and state that SLA threshold compliance checks are not applicable to this query type.\n"
-        "- Only report SLA violations when telemetry contains values that strictly exceed OCS critical thresholds.\n"
-        "- Do not make up values; use only numbers present in the telemetry results.\n"
+        "- If the tool results are completely empty (e.g. empty lists [] or empty dictionaries {}), state clearly that no telemetry data was returned by Prometheus.\n"
+        "- Do not make up values; use only numbers or labels present in the telemetry results.\n"
         "- Keep descriptions concise, data-driven, and highly readable."
     )
     full_summary = ""
@@ -988,6 +1059,9 @@ async def process_query(request: QueryRequest):
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
+        import traceback
+        print(f"[ERROR] /api/query failed: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/config")
